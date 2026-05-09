@@ -35,33 +35,38 @@ class GitHubStarsSource(Source):
     def __init__(self, *, token: str) -> None:
         if not token:
             raise ValueError("GITHUB_TOKEN must be set (via Doppler or .env).")
-        self._client = httpx.Client(
-            base_url=GITHUB_API,
-            headers={
-                "Accept": "application/vnd.github+json",
-                "Authorization": f"Bearer {token}",
-                "X-GitHub-Api-Version": "2022-11-28",
-                "User-Agent": "sync-to-readwise",
-            },
-            timeout=30.0,
-        )
+        self._token = token
 
     def fetch_candidates(self) -> Iterable[Item]:
         # Default sort=created (when starred) descending — newest stars first,
         # which matches the YouTube source's order and would let a future
         # short-circuit-on-known-URL optimization stop early on steady-state
         # syncs.
-        url: str | None = "/user/starred"
-        params: dict[str, str | int] | None = {"per_page": PER_PAGE, "sort": "created"}
-        while url:
-            r = self._client.get(url, params=params)
-            r.raise_for_status()
-            for repo in r.json():
-                yield self._to_item(repo)
-            url = _next_url(r.headers.get("link"))
-            # Subsequent URLs from the Link header already carry the query
-            # string, so don't re-pass params.
-            params = None
+        #
+        # Client is scoped to this generator so its connection pool is closed
+        # when iteration ends — sources are built fresh on each sync interval,
+        # so a long-lived client on `self` would leak per cycle.
+        with httpx.Client(
+            base_url=GITHUB_API,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {self._token}",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "User-Agent": "sync-to-readwise",
+            },
+            timeout=30.0,
+        ) as client:
+            url: str | None = "/user/starred"
+            params: dict[str, str | int] | None = {"per_page": PER_PAGE, "sort": "created"}
+            while url:
+                r = client.get(url, params=params)
+                r.raise_for_status()
+                for repo in r.json():
+                    yield self._to_item(repo)
+                url = _next_url(r.headers.get("link"))
+                # Subsequent URLs from the Link header already carry the query
+                # string, so don't re-pass params.
+                params = None
 
     @staticmethod
     def _to_item(repo: dict) -> Item:
