@@ -42,9 +42,7 @@ class Settings(BaseSettings):
     data_dir: Path = Path("/data")
 
     # Third-party tokens / OAuth (unprefixed conventional names)
-    readwise_token: SecretStr = Field(
-        default=SecretStr(""), validation_alias="READWISE_TOKEN"
-    )
+    readwise_token: SecretStr = Field(default=SecretStr(""), validation_alias="READWISE_TOKEN")
     youtube_oauth_client_id: SecretStr = Field(
         default=SecretStr(""), validation_alias="YOUTUBE_OAUTH_CLIENT_ID"
     )

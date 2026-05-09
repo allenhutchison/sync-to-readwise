@@ -16,7 +16,7 @@
 
 services:
   sync-to-readwise:
-    image: sync-to-readwise:latest
+    image: allenhutchison/sync-to-readwise:${SYNCRW_IMAGE_TAG:-latest}
     container_name: sync-to-readwise
     restart: unless-stopped
     environment:

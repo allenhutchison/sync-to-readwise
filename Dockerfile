@@ -1,9 +1,12 @@
-FROM python:3.12-slim
+FROM python:3.12-slim AS base
 
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/app/.venv
+
+COPY --from=ghcr.io/astral-sh/uv:0.8 /uv /uvx /usr/local/bin/
 
 # Install the Doppler CLI. The entrypoint (added below) wraps CMD with
 # `doppler run` when DOPPLER_TOKEN is set, so all runtime secrets can be
@@ -21,10 +24,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY pyproject.toml README.md ./
-COPY src ./src
+# Install dependencies first for better layer caching: only re-runs when
+# pyproject.toml or uv.lock changes.
+COPY pyproject.toml uv.lock README.md ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-install-project --no-dev
 
-RUN pip install .
+COPY src ./src
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod 755 /usr/local/bin/docker-entrypoint.sh
@@ -33,6 +41,8 @@ RUN useradd --create-home --shell /bin/bash app \
     && mkdir -p /data \
     && chown -R app:app /data /app
 USER app
+
+ENV PATH="/app/.venv/bin:${PATH}"
 
 VOLUME ["/data"]
 

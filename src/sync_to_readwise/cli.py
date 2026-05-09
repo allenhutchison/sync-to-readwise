@@ -102,7 +102,9 @@ def run_daemon(ctx: click.Context) -> None:
     """Run the long-lived scheduler. Each enabled source runs on its own interval."""
     cfg = _load(ctx.obj["config_path"])
 
-    enabled = {name: cfg.source_config(name) for name in REGISTRY if cfg.source_config(name).enabled}
+    enabled = {
+        name: cfg.source_config(name) for name in REGISTRY if cfg.source_config(name).enabled
+    }
     if not enabled:
         log.warning("no_sources_enabled", registered=sorted(REGISTRY))
         return

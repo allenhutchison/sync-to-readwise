@@ -36,6 +36,9 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["src/sync_to_readwise"]
 
+[tool.uv]
+package = true
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"

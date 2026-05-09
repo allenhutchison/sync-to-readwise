@@ -98,16 +98,19 @@ docker compose logs -f
 
 The first run **backfills all** of your liked videos into Readwise (location: `later`, tag: `youtube`). Subsequent runs poll every 15 minutes for new likes.
 
-### Production
+### Production / homelab
 
-`docker-compose.prod.yml` is the deployment shape: the only host-side secret is a Doppler service token. The container fetches everything else at start.
+The image is published to Docker Hub at [`allenhutchison/sync-to-readwise`](https://hub.docker.com/r/allenhutchison/sync-to-readwise) by GitHub Actions on every push to `main` (`latest` + short SHA) and version tag `vX.Y.Z` (semver tags). `docker-compose.prod.yml` is the deployment shape: the only host-side secret is a Doppler service token; the container fetches everything else at start.
 
 ```bash
 DOPPLER_TOKEN=$(doppler configs tokens create homelab --plain \
     --project sync-to-readwise --config prod --max-age 90d)
 
+DOPPLER_TOKEN="$DOPPLER_TOKEN" docker compose -f docker-compose.prod.yml pull
 DOPPLER_TOKEN="$DOPPLER_TOKEN" docker compose -f docker-compose.prod.yml up -d
 ```
+
+Pin a specific image with `SYNCRW_IMAGE_TAG=v1.2.3` (or a `sha-abc1234`) instead of `latest`.
 
 ### One-shot run
 
@@ -157,6 +160,19 @@ Environment (Doppler / `.env`):
 | `SYNCRW_LOG_LEVEL`             | no       | Default `INFO`.                                    |
 | `SYNCRW_DATA_DIR`              | no       | Default `/data`.                                   |
 | `DOPPLER_TOKEN`                | prod     | Service token; entrypoint calls `doppler run` when present.       |
+
+## CI / publishing
+
+- `.github/workflows/ci.yml`: ruff format check + ruff lint + Docker smoke (build the image and confirm the CLI dispatches inside it). Runs on every PR and push to `main`.
+- `.github/workflows/publish.yml`: pushes to `allenhutchison/sync-to-readwise` on Docker Hub. Tags: `latest` + `sha-<short>` for `main` pushes; semver `X.Y.Z` / `X.Y` / `X` for `vX.Y.Z` git tags. Uses GHA layer cache.
+- `.github/dependabot.yml`: weekly PRs for Python deps (uv), GitHub Actions, and Dockerfile base images.
+
+To enable publishing, set these repository secrets in GitHub Settings → Secrets and variables → Actions:
+
+| Secret               | Value                                                                |
+|----------------------|----------------------------------------------------------------------|
+| `DOCKERHUB_USERNAME` | Your Docker Hub username (`allenhutchison`).                          |
+| `DOCKERHUB_TOKEN`    | A Docker Hub access token with read/write/delete on the repo.         |
 
 ## Notes
 
