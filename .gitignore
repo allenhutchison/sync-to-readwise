@@ -12,3 +12,6 @@ dist/
 # Claude Code local state
 .claude/scheduled_tasks.lock
 .claude/worktrees/
+
+# Doppler workspace pointer (per-developer; project/config setup is documented in README)
+doppler.yaml

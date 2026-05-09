@@ -37,8 +37,10 @@ Non-secret config (intervals, locations, tags) lives in `data/config.yaml` so it
 ```bash
 brew install dopplerhq/cli/doppler   # if not already installed
 doppler login
-doppler setup                        # picks up doppler.yaml → sync-to-readwise/dev
+doppler setup --project sync-to-readwise --config dev
 ```
+
+> The local `doppler.yaml` that `doppler setup` writes is per-developer state and is gitignored. Each contributor runs `doppler setup` once after cloning.
 
 Set the three secrets above:
 
