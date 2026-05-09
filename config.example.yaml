@@ -1,11 +1,19 @@
 # sync-to-readwise non-secret config. Copy to ./data/config.yaml.
-# Secrets (READWISE_TOKEN, YOUTUBE_OAUTH_*) live in Doppler, not here.
+# Secrets (READWISE_TOKEN, YOUTUBE_OAUTH_*, GITHUB_TOKEN) live in Doppler.
 
 # Per-source overrides. Sources not listed here use the defaults baked into
-# the source (and are enabled).
+# the source (and are enabled). At daemon startup, sources whose required
+# credentials are missing are logged as warnings and skipped — there's no
+# need to set `enabled: false` just to disable a source you haven't set up.
 sources:
   youtube:
     enabled: true
     interval_minutes: 15
     location: later        # 'new' | 'later' | 'shortlist' | 'archive' | 'feed'
-    tags: []               # extra tags applied on top of 'youtube'
+    tags: []               # extra tags applied on top of the source's defaults
+
+  github_stars:
+    enabled: true
+    interval_minutes: 60   # stars are infrequent; no need to poll often
+    location: later
+    tags: []

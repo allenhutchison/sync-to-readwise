@@ -2,7 +2,9 @@
 
 Pluggable syncer that pushes content from third-party sources into [Readwise Reader](https://readwise.io/read).
 
-The first source is **YouTube liked videos** — when you like a video on YouTube, it shows up in Reader for triage.
+Built-in sources:
+- **YouTube liked videos** — when you like a video on YouTube, it shows up in Reader for triage.
+- **GitHub starred repositories** — when you star a repo, the README ends up in Reader.
 
 ## Architecture
 
@@ -20,13 +22,14 @@ The first source is **YouTube liked videos** — when you like a video on YouTub
 
 ## Secrets
 
-These three live in Doppler (project: `sync-to-readwise`):
+These live in Doppler (project: `sync-to-readwise`). `READWISE_TOKEN` is required; the per-source secrets are required only for the sources you actually enable — sources whose credentials are missing get logged and skipped at startup, so an unused source is harmless.
 
-| Secret                         | Where it comes from                                                          |
-|--------------------------------|------------------------------------------------------------------------------|
-| `READWISE_TOKEN`               | https://readwise.io/access_token                                             |
-| `YOUTUBE_OAUTH_CLIENT_ID`      | Google Cloud Console → Credentials → OAuth 2.0 Client (Desktop)              |
-| `YOUTUBE_OAUTH_CLIENT_SECRET`  | Same OAuth client                                                            |
+| Secret                         | Used by         | Where it comes from                                              |
+|--------------------------------|-----------------|------------------------------------------------------------------|
+| `READWISE_TOKEN`               | core            | https://readwise.io/access_token                                 |
+| `YOUTUBE_OAUTH_CLIENT_ID`      | `youtube`       | Google Cloud Console → Credentials → OAuth 2.0 Client (Desktop)  |
+| `YOUTUBE_OAUTH_CLIENT_SECRET`  | `youtube`       | Same OAuth client                                                |
+| `GITHUB_TOKEN`                 | `github_stars`  | GitHub → Settings → Developer settings → Personal access tokens. Default scope is fine for public stars; add `repo` if you star private repos. |
 
 Non-secret config (intervals, locations, tags) lives in `data/config.yaml` so it's reviewable in git.
 

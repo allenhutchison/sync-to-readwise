@@ -8,7 +8,7 @@ import structlog
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
-from sync_to_readwise.core.config import AppConfig, load
+from sync_to_readwise.core.config import AppConfig, SourceConfig, load
 from sync_to_readwise.core.logging import configure_logging
 from sync_to_readwise.core.readwise import ReadwiseClient
 from sync_to_readwise.core.syncer import Syncer
@@ -99,14 +99,38 @@ def sync_once(ctx: click.Context, source_name: str) -> None:
 @main.command("run")
 @click.pass_context
 def run_daemon(ctx: click.Context) -> None:
-    """Run the long-lived scheduler. Each enabled source runs on its own interval."""
+    """Run the long-lived scheduler. Each enabled source runs on its own interval.
+
+    At startup we probe-build every source whose `enabled` flag is on. Sources
+    whose constructors raise (typically: missing credentials) are logged as
+    warnings and skipped. This lets you register a source in code without
+    forcing every deployment to configure its credentials.
+    """
     cfg = _load(ctx.obj["config_path"])
 
-    enabled = {
+    candidates = {
         name: cfg.source_config(name) for name in REGISTRY if cfg.source_config(name).enabled
     }
-    if not enabled:
+    if not candidates:
         log.warning("no_sources_enabled", registered=sorted(REGISTRY))
+        return
+
+    enabled: dict[str, SourceConfig] = {}
+    for name, src_cfg in candidates.items():
+        try:
+            build_source(name, cfg)
+        except Exception as e:
+            log.warning(
+                "source_skipped",
+                source=name,
+                reason=type(e).__name__,
+                detail=str(e),
+            )
+            continue
+        enabled[name] = src_cfg
+
+    if not enabled:
+        log.warning("no_sources_runnable", registered=sorted(REGISTRY))
         return
 
     rw = ReadwiseClient(cfg.settings.readwise_token.get_secret_value())

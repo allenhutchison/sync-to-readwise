@@ -15,6 +15,7 @@ services:
       - READWISE_TOKEN
       - YOUTUBE_OAUTH_CLIENT_ID
       - YOUTUBE_OAUTH_CLIENT_SECRET
+      - GITHUB_TOKEN
     volumes:
       - ./data:/data
     # For one-time OAuth setup, override the command and map a port:

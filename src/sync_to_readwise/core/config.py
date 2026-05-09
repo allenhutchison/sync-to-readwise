@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     youtube_oauth_client_secret: SecretStr = Field(
         default=SecretStr(""), validation_alias="YOUTUBE_OAUTH_CLIENT_SECRET"
     )
+    github_token: SecretStr = Field(default=SecretStr(""), validation_alias="GITHUB_TOKEN")
 
     @field_validator("data_dir", mode="before")
     @classmethod

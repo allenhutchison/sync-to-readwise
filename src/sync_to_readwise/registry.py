@@ -6,6 +6,7 @@ from collections.abc import Callable
 
 from sync_to_readwise.core.config import AppConfig, SourceConfig
 from sync_to_readwise.core.source import Source
+from sync_to_readwise.sources.github_stars import GitHubStarsSource
 from sync_to_readwise.sources.youtube import YouTubeLikesSource
 
 SourceFactory = Callable[[AppConfig, SourceConfig], Source]
@@ -19,8 +20,13 @@ def _build_youtube(cfg: AppConfig, src_cfg: SourceConfig) -> Source:
     )
 
 
+def _build_github_stars(cfg: AppConfig, src_cfg: SourceConfig) -> Source:
+    return GitHubStarsSource(token=cfg.settings.github_token.get_secret_value())
+
+
 REGISTRY: dict[str, SourceFactory] = {
     "youtube": _build_youtube,
+    "github_stars": _build_github_stars,
 }
 
 
