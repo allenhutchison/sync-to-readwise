@@ -1,0 +1,3 @@
+setup:
+  project: sync-to-readwise
+  config: dev

@@ -1,0 +1,11 @@
+# sync-to-readwise non-secret config. Copy to ./data/config.yaml.
+# Secrets (READWISE_TOKEN, YOUTUBE_OAUTH_*) live in Doppler, not here.
+
+# Per-source overrides. Sources not listed here use the defaults baked into
+# the source (and are enabled).
+sources:
+  youtube:
+    enabled: true
+    interval_minutes: 15
+    location: later        # 'new' | 'later' | 'shortlist' | 'archive' | 'feed'
+    tags: []               # extra tags applied on top of 'youtube'

@@ -1,0 +1,30 @@
+# Production / homelab deployment shape.
+#
+# In prod the only host-side secret is DOPPLER_TOKEN — a Doppler service token
+# scoped to ``sync-to-readwise/prod``. The container's entrypoint runs the actual
+# command under ``doppler run --``, which fetches every other secret
+# (READWISE_TOKEN, YOUTUBE_OAUTH_CLIENT_ID, YOUTUBE_OAUTH_CLIENT_SECRET) at
+# start time and injects them as environment variables.
+#
+# Bring up:
+#   DOPPLER_TOKEN=$(doppler configs tokens create homelab --plain \
+#       --project sync-to-readwise --config prod --max-age 90d) \
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# Or pin the token in your homelab compose env_file. See pepper's homelab
+# compose for the exact pattern.
+
+services:
+  sync-to-readwise:
+    image: sync-to-readwise:latest
+    container_name: sync-to-readwise
+    restart: unless-stopped
+    environment:
+      DOPPLER_TOKEN: ${DOPPLER_TOKEN:?Missing DOPPLER_TOKEN (service token scoped to sync-to-readwise/prod)}
+      SYNCRW_LOG_LEVEL: INFO
+      SYNCRW_DATA_DIR: /data
+    volumes:
+      - sync-to-readwise-data:/data
+
+volumes:
+  sync-to-readwise-data:

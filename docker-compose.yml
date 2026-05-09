@@ -1,0 +1,24 @@
+services:
+  sync-to-readwise:
+    build: .
+    image: sync-to-readwise:latest
+    container_name: sync-to-readwise
+    restart: unless-stopped
+    # Expected usage: ``doppler run -- docker compose up``. Doppler injects
+    # ``sync-to-readwise/dev`` secrets into the shell, and the list-style
+    # entries without ``=`` below forward them into the container. Running
+    # without ``doppler run`` leaves the forwarded vars empty — READWISE_TOKEN
+    # will be blank and the app will fail fast at config load.
+    environment:
+      - SYNCRW_LOG_LEVEL=INFO
+      - SYNCRW_DATA_DIR=/data
+      - READWISE_TOKEN
+      - YOUTUBE_OAUTH_CLIENT_ID
+      - YOUTUBE_OAUTH_CLIENT_SECRET
+    volumes:
+      - ./data:/data
+    # For one-time OAuth setup, override the command and map a port:
+    #   doppler run -- docker compose run --rm --service-ports \
+    #       sync-to-readwise sync-to-readwise setup youtube
+    ports:
+      - "8080:8080"
