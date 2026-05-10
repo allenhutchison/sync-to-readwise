@@ -15,7 +15,7 @@ Built-in sources:
 └──────────────┘     └────────────────┘     └────────────┘
 ```
 
-> Interactive deep dive: open [`docs/codebase-overview.html`](docs/codebase-overview.html) in a browser for a tabbed walkthrough of the architecture, modules, sync flow, and ops. Single self-contained HTML — clone the repo and open it directly (GitHub doesn't render raw HTML inline).
+> Interactive deep dive: **[allenhutchison.github.io/sync-to-readwise](https://allenhutchison.github.io/sync-to-readwise/)** — a tabbed walkthrough of the architecture, modules, sync flow, and ops. Source lives at [`docs/index.html`](docs/index.html); GitHub Pages serves it from `main` / `/docs`.
 
 - `Source` is an interface — adding a new source (Reddit saved, GitHub stars, etc.) is one file plus a registry entry.
 - The syncer queries Readwise to dedup; no local "what's been synced" state file.
