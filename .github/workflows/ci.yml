@@ -31,6 +31,24 @@ jobs:
       - name: Lint (ruff check)
         run: uv run ruff check
 
+  tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Run tests with coverage
+        run: uv run pytest
+
   docker-smoke:
     # Build the runtime image and verify the CLI imports + dispatches inside it.
     # Catches deploy bugs where a runtime artifact is missing — the kind of
