@@ -147,7 +147,7 @@ def run_daemon(ctx: click.Context) -> None:
 
     for name, src_cfg in enabled.items():
         trigger = IntervalTrigger(minutes=src_cfg.interval_minutes)
-        scheduler.add_job(_run_source, trigger, args=[name], id=name, next_run_time=None)
+        scheduler.add_job(_run_source, trigger, args=[name], id=name)
         log.info("source_scheduled", source=name, interval_minutes=src_cfg.interval_minutes)
         scheduler.add_job(_run_source, args=[name], id=f"{name}-initial")
 
