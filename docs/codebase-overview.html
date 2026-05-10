@@ -1,0 +1,602 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>sync-to-readwise — codebase overview</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --bg-elev: #161922;
+    --bg-elev-2: #1d2230;
+    --line: #2a3142;
+    --text: #e6eaf2;
+    --muted: #8b94a8;
+    --accent: #7aa2ff;
+    --accent-2: #a98bff;
+    --good: #6fe19a;
+    --warn: #ffd06b;
+    --bad: #ff7a7a;
+    --pill-yt: #ff5e5e;
+    --pill-gh: #b48cff;
+    --pill-rw: #5fbf8e;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.55 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+  }
+  code, pre, .mono { font-family: "SF Mono", "JetBrains Mono", Menlo, Monaco, Consolas, monospace; font-size: 12.5px; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 32px 28px 80px; }
+  header.title h1 { font-size: 28px; margin: 0 0 8px; letter-spacing: -0.01em; }
+  header.title p { margin: 0; color: var(--muted); }
+  header.title .meta { margin-top: 14px; display: flex; gap: 18px; flex-wrap: wrap; color: var(--muted); font-size: 12.5px; }
+  header.title .meta b { color: var(--text); font-weight: 500; }
+
+  nav.tabs {
+    margin: 28px 0 22px;
+    display: flex; gap: 4px;
+    border-bottom: 1px solid var(--line);
+  }
+  nav.tabs button {
+    background: transparent; border: 0; color: var(--muted);
+    padding: 10px 16px; font: inherit; cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: color .15s, border-color .15s;
+  }
+  nav.tabs button:hover { color: var(--text); }
+  nav.tabs button.active { color: var(--text); border-bottom-color: var(--accent); }
+
+  section.tab { display: none; }
+  section.tab.active { display: block; }
+
+  h2 { font-size: 18px; margin: 28px 0 12px; letter-spacing: -0.01em; }
+  h3 { font-size: 14px; margin: 18px 0 8px; color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; }
+
+  .card {
+    background: var(--bg-elev);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px 18px;
+  }
+  .grid { display: grid; gap: 12px; }
+  .grid.cols-2 { grid-template-columns: 1fr 1fr; }
+  .grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+
+  /* Architecture diagram */
+  .arch {
+    margin: 14px 0 6px;
+    padding: 22px;
+    background: var(--bg-elev);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow-x: auto;
+  }
+  .arch svg { display: block; margin: 0 auto; max-width: 100%; }
+  .arch .legend { display: flex; gap: 14px; margin-top: 14px; flex-wrap: wrap; color: var(--muted); font-size: 12.5px; }
+  .arch .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .arch .legend i {
+    width: 10px; height: 10px; border-radius: 2px; display: inline-block;
+  }
+
+  /* Module list */
+  .modlist { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 10px; }
+  .mod {
+    display: grid; grid-template-columns: minmax(260px, 1fr) auto auto auto;
+    align-items: center; gap: 14px;
+    padding: 12px 14px;
+    background: var(--bg-elev);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+  }
+  .mod:hover { border-color: #3a4358; background: var(--bg-elev-2); }
+  .mod .path { color: var(--text); }
+  .mod .path .leaf { color: var(--accent); }
+  .mod .badge {
+    color: var(--muted); font-size: 12px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px;
+  }
+  .mod .lc { color: var(--muted); font-size: 12px; }
+  .mod .arrow { color: var(--muted); transition: transform .15s; }
+  .mod[data-open="1"] .arrow { transform: rotate(90deg); }
+  .mod-detail {
+    display: none;
+    padding: 0 14px 14px 14px;
+    margin: -8px 0 8px;
+    background: var(--bg-elev);
+    border: 1px solid var(--line);
+    border-top: 0;
+    border-radius: 0 0 8px 8px;
+    color: var(--muted);
+  }
+  .mod-detail.open { display: block; }
+  .mod-detail ul { margin: 8px 0 0; padding-left: 18px; }
+  .mod-detail li { margin: 3px 0; }
+  .mod-detail .imports { margin-top: 8px; color: var(--muted); font-size: 12px; }
+  .mod-detail .imports b { color: var(--text); }
+
+  /* Pills */
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; }
+  .pill.core { background: rgba(122,162,255,.15); color: var(--accent); }
+  .pill.source { background: rgba(169,139,255,.15); color: var(--accent-2); }
+  .pill.cli { background: rgba(111,225,154,.15); color: var(--good); }
+
+  /* Flow */
+  .flow { display: grid; gap: 10px; }
+  .step {
+    display: grid; grid-template-columns: 38px 1fr; gap: 14px;
+    padding: 12px 14px; background: var(--bg-elev); border: 1px solid var(--line); border-radius: 8px;
+  }
+  .step .n {
+    height: 26px; width: 26px; border-radius: 50%;
+    background: var(--bg-elev-2); color: var(--accent);
+    display: grid; place-items: center; font-weight: 600;
+    border: 1px solid var(--line);
+  }
+  .step b { color: var(--text); }
+  .step small { color: var(--muted); }
+  .step code { background: var(--bg-elev-2); padding: 1px 5px; border-radius: 4px; }
+
+  /* Sources panel */
+  .src-card {
+    background: var(--bg-elev);
+    border: 1px solid var(--line);
+    border-radius: 10px; padding: 16px 18px;
+    display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: start;
+  }
+  .src-card .icon {
+    width: 40px; height: 40px; border-radius: 8px;
+    display: grid; place-items: center; font-weight: 700; color: white;
+  }
+  .src-card.youtube .icon { background: var(--pill-yt); }
+  .src-card.gh .icon { background: var(--pill-gh); }
+  .src-card .meta { color: var(--muted); font-size: 12.5px; margin-top: 6px; }
+  .src-card .meta b { color: var(--text); }
+  .src-card .meta + .meta { margin-top: 2px; }
+
+  /* Adding a source */
+  .recipe { background: var(--bg-elev); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
+  .recipe pre {
+    background: var(--bg); border: 1px solid var(--line);
+    border-radius: 8px; padding: 12px 14px; margin: 8px 0;
+    overflow-x: auto;
+  }
+  .recipe ol { margin: 0 0 0 20px; padding: 0; }
+  .recipe ol li { margin: 8px 0; }
+
+  /* Ops */
+  .ops .row { display: grid; grid-template-columns: 200px 1fr; gap: 16px; padding: 10px 0; border-top: 1px solid var(--line); }
+  .ops .row:first-of-type { border-top: 0; }
+  .ops .row .k { color: var(--muted); }
+  .ops .row .v code { background: var(--bg-elev-2); padding: 1px 5px; border-radius: 4px; }
+  .secrets-table {
+    width: 100%; border-collapse: collapse; margin-top: 8px;
+  }
+  .secrets-table th, .secrets-table td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--line); }
+  .secrets-table th { color: var(--muted); font-weight: 500; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .secrets-table td.who { color: var(--muted); font-size: 12.5px; }
+
+  footer { margin-top: 36px; color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="title">
+    <h1>sync-to-readwise</h1>
+    <p>Pluggable framework for syncing third-party content into Readwise Reader. Daemon-on-Docker, secrets via Doppler.</p>
+    <div class="meta">
+      <span><b>~940</b> lines of Python</span>
+      <span><b>2</b> sources (youtube, github_stars)</span>
+      <span>Python <b>3.14</b> · uv · APScheduler · httpx · pydantic-settings</span>
+      <span>Repo: <a href="https://github.com/allenhutchison/sync-to-readwise" target="_blank">allenhutchison/sync-to-readwise</a></span>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="active" data-tab="arch">Architecture</button>
+    <button data-tab="mods">Modules</button>
+    <button data-tab="sources">Sources</button>
+    <button data-tab="flow">Sync flow</button>
+    <button data-tab="add">Add a source</button>
+    <button data-tab="ops">Ops &amp; secrets</button>
+  </nav>
+
+  <!-- ARCHITECTURE -->
+  <section class="tab active" id="arch">
+    <p style="color:var(--muted);max-width:780px;margin:0 0 16px;">
+      Sources fetch candidate items from external APIs. The Syncer asks Readwise what's already saved (cached in memory),
+      then writes only the new items via Readwise's <code>/save/</code> endpoint. APScheduler runs each source on its own
+      interval. Doppler provides every secret at process start; nothing is committed.
+    </p>
+
+    <div class="arch">
+      <svg viewBox="0 0 1080 380" role="img" aria-label="Architecture diagram">
+        <defs>
+          <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+            <path d="M0,0 L9,3 L0,6 z" fill="#8b94a8" />
+          </marker>
+        </defs>
+
+        <!-- Doppler -->
+        <g>
+          <rect x="40" y="40" width="180" height="60" rx="10" fill="#1d2230" stroke="#2a3142" />
+          <text x="130" y="68" text-anchor="middle" fill="#e6eaf2" font-size="14" font-weight="600">Doppler</text>
+          <text x="130" y="88" text-anchor="middle" fill="#8b94a8" font-size="11">project: sync-to-readwise</text>
+        </g>
+
+        <!-- Container -->
+        <rect x="280" y="20" width="760" height="340" rx="14" fill="none" stroke="#2a3142" stroke-dasharray="4,4" />
+        <text x="294" y="40" fill="#8b94a8" font-size="11">Docker container (chowda)</text>
+
+        <!-- entrypoint -->
+        <g>
+          <rect x="300" y="50" width="180" height="50" rx="8" fill="#1d2230" stroke="#2a3142" />
+          <text x="390" y="78" text-anchor="middle" fill="#e6eaf2" font-size="13">docker-entrypoint.sh</text>
+          <text x="390" y="93" text-anchor="middle" fill="#8b94a8" font-size="10.5">doppler run -- "$@"</text>
+        </g>
+
+        <!-- CLI / scheduler -->
+        <g>
+          <rect x="300" y="130" width="280" height="60" rx="10" fill="#161922" stroke="#7aa2ff" />
+          <text x="440" y="158" text-anchor="middle" fill="#e6eaf2" font-size="14" font-weight="600">cli.run_daemon</text>
+          <text x="440" y="178" text-anchor="middle" fill="#8b94a8" font-size="11">APScheduler · per-source interval</text>
+        </g>
+
+        <!-- Syncer -->
+        <g>
+          <rect x="380" y="220" width="200" height="60" rx="10" fill="#161922" stroke="#7aa2ff" />
+          <text x="480" y="248" text-anchor="middle" fill="#e6eaf2" font-size="14" font-weight="600">Syncer</text>
+          <text x="480" y="266" text-anchor="middle" fill="#8b94a8" font-size="11">dedup + push</text>
+        </g>
+
+        <!-- Sources -->
+        <g>
+          <rect x="660" y="80" width="200" height="60" rx="10" fill="#161922" stroke="#a98bff" />
+          <text x="760" y="108" text-anchor="middle" fill="#e6eaf2" font-size="14" font-weight="600">YouTubeLikesSource</text>
+          <text x="760" y="126" text-anchor="middle" fill="#8b94a8" font-size="11">YouTube Data API v3</text>
+
+          <rect x="660" y="160" width="200" height="60" rx="10" fill="#161922" stroke="#a98bff" />
+          <text x="760" y="188" text-anchor="middle" fill="#e6eaf2" font-size="14" font-weight="600">GitHubStarsSource</text>
+          <text x="760" y="206" text-anchor="middle" fill="#8b94a8" font-size="11">GitHub REST · /user/starred</text>
+        </g>
+
+        <!-- Readwise -->
+        <g>
+          <rect x="900" y="120" width="120" height="80" rx="10" fill="#1d2230" stroke="#5fbf8e" />
+          <text x="960" y="148" text-anchor="middle" fill="#e6eaf2" font-size="14" font-weight="600">Readwise</text>
+          <text x="960" y="166" text-anchor="middle" fill="#8b94a8" font-size="11">Reader v3</text>
+          <text x="960" y="184" text-anchor="middle" fill="#8b94a8" font-size="11">/list/, /save/</text>
+        </g>
+
+        <!-- arrows -->
+        <line x1="220" y1="70" x2="298" y2="70" stroke="#8b94a8" stroke-width="1.5" marker-end="url(#arrow)"/>
+        <line x1="390" y1="100" x2="390" y2="128" stroke="#8b94a8" stroke-width="1.5" marker-end="url(#arrow)"/>
+        <line x1="440" y1="190" x2="475" y2="218" stroke="#8b94a8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+        <!-- Syncer -> Sources -->
+        <line x1="580" y1="240" x2="660" y2="120" stroke="#a98bff" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+        <line x1="580" y1="240" x2="660" y2="195" stroke="#a98bff" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+
+        <!-- Syncer <-> Readwise -->
+        <line x1="580" y1="250" x2="900" y2="160" stroke="#5fbf8e" stroke-width="1.5" marker-end="url(#arrow)"/>
+        <line x1="900" y1="180" x2="600" y2="265" stroke="#5fbf8e" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+
+        <text x="730" y="320" fill="#8b94a8" font-size="10.5">solid: writes · dashed: reads</text>
+      </svg>
+      <div class="legend">
+        <span><i style="background:#7aa2ff"></i> core (cli, syncer, readwise client)</span>
+        <span><i style="background:#a98bff"></i> source adapters (per integration)</span>
+        <span><i style="background:#5fbf8e"></i> Readwise (target)</span>
+      </div>
+    </div>
+
+    <h3>Design choices that matter</h3>
+    <div class="grid cols-2">
+      <div class="card">
+        <b>Dedup is read-from-Readwise, not local state.</b>
+        <p style="color:var(--muted);margin:8px 0 0">Each sync warms an in-memory URL set from <code>/list/?category=&lt;cat&gt;</code>, scoped to the source's category (video for YouTube, article for github_stars). We never re-<code>save</code> an existing URL, so triaging in Reader is preserved.</p>
+      </div>
+      <div class="card">
+        <b>Save throttle honours the documented limit.</b>
+        <p style="color:var(--muted);margin:8px 0 0">3.5s minimum between <code>/save/</code> calls keeps us under Readwise's 20/min. On 429s we read <code>Retry-After</code> and sleep that long (tenacity-style backoff capped too low for Readwise's ~47s windows).</p>
+      </div>
+      <div class="card">
+        <b>Sources are opt-in by credentials.</b>
+        <p style="color:var(--muted);margin:8px 0 0">Every registered source is probe-built at startup. Missing creds → <code>source_skipped</code> warning + skip from the schedule. Adding a source to <code>registry.py</code> never breaks an existing deployment.</p>
+      </div>
+      <div class="card">
+        <b>Doppler is the only secret store.</b>
+        <p style="color:var(--muted);margin:8px 0 0">Conventional unprefixed env names for SDKs (<code>READWISE_TOKEN</code>, <code>GITHUB_TOKEN</code>, <code>YOUTUBE_OAUTH_*</code>). Internal config uses <code>SYNCRW_</code>. The container's <code>doppler run --</code> wraps CMD only when <code>DOPPLER_TOKEN</code> is set.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- MODULES -->
+  <section class="tab" id="mods">
+    <p style="color:var(--muted);max-width:780px;margin:0 0 12px;">Click any row for responsibilities and what it imports.</p>
+    <div class="modlist" id="modlist"></div>
+  </section>
+
+  <!-- SOURCES -->
+  <section class="tab" id="sources">
+    <h2>Built-in sources</h2>
+    <div class="grid" style="gap:14px">
+      <div class="src-card youtube">
+        <div class="icon">YT</div>
+        <div>
+          <b>YouTubeLikesSource</b> &nbsp; <span class="pill source">source</span>
+          <div class="meta">paginates the authenticated user's <b>liked videos</b> playlist via YouTube Data API v3</div>
+          <div class="meta"><b>Auth:</b> OAuth 2.0 installed-app flow, refresh token at <code>/data/youtube_token.json</code></div>
+          <div class="meta"><b>Defaults:</b> <code>location=later</code>, tag <code>youtube</code>, dedup against <code>category=video</code></div>
+          <div class="meta"><b>Notes:</b> private/deleted videos are filtered out silently</div>
+        </div>
+      </div>
+
+      <div class="src-card gh">
+        <div class="icon">GH</div>
+        <div>
+          <b>GitHubStarsSource</b> &nbsp; <span class="pill source">source</span>
+          <div class="meta">paginates <code>GET /user/starred?sort=created</code> via GitHub REST</div>
+          <div class="meta"><b>Auth:</b> personal access token (default scope is enough for public stars; <code>repo</code> for private)</div>
+          <div class="meta"><b>Defaults:</b> <code>location=later</code>, tag <code>github</code>, dedup against <code>category=article</code></div>
+          <div class="meta"><b>Notes:</b> httpx client is scoped to <code>fetch_candidates()</code> so its connection pool is released per cycle</div>
+        </div>
+      </div>
+    </div>
+
+    <h2 style="margin-top:28px">Source contract</h2>
+    <div class="card">
+      <pre class="mono" style="margin:0;color:var(--text)"><span style="color:var(--accent-2)">class</span> Source(ABC):
+    <span style="color:var(--accent)">name</span>: str
+    <span style="color:var(--accent)">default_location</span>: str = <span style="color:var(--good)">"later"</span>
+    <span style="color:var(--accent)">default_tags</span>: tuple[str, ...] = ()
+    <span style="color:var(--accent)">readwise_category</span>: str | None = None  <span style="color:var(--muted)"># scopes the dedup cache</span>
+
+    <span style="color:var(--accent-2)">@abstractmethod</span>
+    <span style="color:var(--accent-2)">def</span> fetch_candidates(self) -> Iterable[Item]: ...</pre>
+    </div>
+  </section>
+
+  <!-- SYNC FLOW -->
+  <section class="tab" id="flow">
+    <h2>What happens when the daemon ticks</h2>
+    <p style="color:var(--muted);max-width:780px;margin:0 0 16px;">Each interval, APScheduler fires <code>_run_source(name)</code> for the source whose timer expired. Two sources run on independent timers; they share one <code>ReadwiseClient</code> (and thus one in-memory dedup cache).</p>
+    <div class="flow">
+      <div class="step"><div class="n">1</div><div><b>build_source(name, cfg)</b><br/><small>Looks up the source factory in the registry. Each call constructs a fresh source — the daemon doesn't keep long-lived API clients between ticks.</small></div></div>
+      <div class="step"><div class="n">2</div><div><b>readwise.warm_cache(category=&lt;cat&gt;)</b><br/><small>First tick: paginates <code>/list/?category=&lt;cat&gt;</code>, populates <code>_known_urls</code>. Subsequent ticks in the same daemon process: no-op (idempotent per category).</small></div></div>
+      <div class="step"><div class="n">3</div><div><b>source.fetch_candidates()</b><br/><small>Lazy iterator. Pages the upstream API (YouTube / GitHub). Yields <code>Item(url, title, …)</code>.</small></div></div>
+      <div class="step"><div class="n">4</div><div><b>readwise.exists(url)</b><br/><small>O(1) set lookup. Hit → skip. Miss → step 5.</small></div></div>
+      <div class="step"><div class="n">5</div><div><b>readwise.create_document(item, location, tags)</b><br/><small>Throttles to 3.5s minimum between saves. POSTs <code>/save/</code>. Tags: source defaults ∪ per-source override from YAML. URL added to <code>_known_urls</code> on success.</small></div></div>
+      <div class="step"><div class="n">6</div><div><b>SyncResult(seen, created, skipped, errors) logged</b><br/><small>Structured log emitted as <code>sync_completed</code>. Errors during a single item are logged with <code>item_create_failed</code> and the loop continues.</small></div></div>
+    </div>
+  </section>
+
+  <!-- ADD A SOURCE -->
+  <section class="tab" id="add">
+    <h2>Adding a new source</h2>
+    <div class="recipe">
+      <ol>
+        <li>Create <code>src/sync_to_readwise/sources/&lt;name&gt;.py</code> implementing <code>Source</code>:
+<pre>class MySource(Source):
+    name = "my_source"
+    default_location = "later"
+    default_tags = ("my_source",)
+    readwise_category = "article"   # or "video" / etc.
+
+    def __init__(self, *, token: str) -> None:
+        if not token:
+            raise ValueError("MY_TOKEN must be set.")
+        self._token = token
+
+    def fetch_candidates(self) -> Iterable[Item]:
+        with httpx.Client(...) as c:
+            for ... in ...:
+                yield Item(url=..., source_name="my_source", title=...)</pre>
+        </li>
+        <li>Add the secret to <code>core/config.py</code> Settings:
+<pre>my_token: SecretStr = Field(default=SecretStr(""), validation_alias="MY_TOKEN")</pre>
+        </li>
+        <li>Register a factory in <code>registry.py</code>:
+<pre>def _build_my_source(cfg: AppConfig, src_cfg: SourceConfig) -> Source:
+    return MySource(token=cfg.settings.my_token.get_secret_value())
+
+REGISTRY = {..., "my_source": _build_my_source}</pre>
+        </li>
+        <li>Forward the env var into the dev container in <code>docker-compose.yml</code> and document it in the README's secrets table.</li>
+        <li>Add the secret to Doppler. Daemon will probe-build at next start: present → enabled, missing → <code>source_skipped</code>.</li>
+      </ol>
+      <p style="color:var(--muted);margin:14px 0 0">No syncer / scheduler / dedup changes needed — the framework picks it up automatically.</p>
+    </div>
+  </section>
+
+  <!-- OPS -->
+  <section class="tab" id="ops">
+    <h2>Operations</h2>
+    <div class="card ops">
+      <div class="row"><div class="k">Production host</div><div class="v">homelab machine <code>chowda</code>, Docker</div></div>
+      <div class="row"><div class="k">Image</div><div class="v"><code>allenhutchison/sync-to-readwise:latest</code> (Docker Hub)</div></div>
+      <div class="row"><div class="k">Built by</div><div class="v"><code>.github/workflows/publish.yml</code> on every push to <code>main</code> + <code>vX.Y.Z</code> tags</div></div>
+      <div class="row"><div class="k">CI</div><div class="v"><code>.github/workflows/ci.yml</code> — ruff format + lint + Docker smoke (CLI <code>--help</code> dispatch)</div></div>
+      <div class="row"><div class="k">Dependencies</div><div class="v">weekly Dependabot PRs for uv (Python deps), GitHub Actions, Docker base images</div></div>
+      <div class="row"><div class="k">Runtime entrypoint</div><div class="v"><code>docker-entrypoint.sh</code> wraps CMD with <code>doppler run --</code> when <code>DOPPLER_TOKEN</code> is set; otherwise plain exec</div></div>
+      <div class="row"><div class="k">Persistent volume</div><div class="v"><code>/data</code> — holds <code>youtube_token.json</code> (OAuth refresh) and optional <code>config.yaml</code></div></div>
+    </div>
+
+    <h3>Secrets in Doppler</h3>
+    <table class="secrets-table">
+      <thead><tr><th>Secret</th><th>Required</th><th>Used by</th></tr></thead>
+      <tbody>
+        <tr><td><code>READWISE_TOKEN</code></td><td>yes</td><td class="who">core</td></tr>
+        <tr><td><code>YOUTUBE_OAUTH_CLIENT_ID</code></td><td>youtube only</td><td class="who"><span class="pill source">youtube</span></td></tr>
+        <tr><td><code>YOUTUBE_OAUTH_CLIENT_SECRET</code></td><td>youtube only</td><td class="who"><span class="pill source">youtube</span></td></tr>
+        <tr><td><code>GITHUB_TOKEN</code></td><td>github_stars only</td><td class="who"><span class="pill source">github_stars</span></td></tr>
+      </tbody>
+    </table>
+
+    <h3>Useful commands</h3>
+    <div class="card">
+      <pre class="mono" style="margin:0">
+<span style="color:var(--muted)"># Local dev sync (one-shot, useful for testing a source)</span>
+doppler run -- docker compose run --rm sync-to-readwise sync-to-readwise sync-once youtube
+
+<span style="color:var(--muted)"># Run the daemon locally</span>
+doppler run -- docker compose up -d
+
+<span style="color:var(--muted)"># YouTube OAuth dance (opens a printed URL; redirect to localhost:8080)</span>
+doppler run -- docker compose run --rm --service-ports sync-to-readwise sync-to-readwise setup youtube
+
+<span style="color:var(--muted)"># Tail logs on chowda</span>
+docker logs --tail 200 -f sync-to-readwise</pre>
+    </div>
+  </section>
+
+  <footer>
+    Generated <span id="now"></span> · Static single-file HTML, no network deps · Click tabs to navigate.
+  </footer>
+</div>
+
+<script>
+  // Tabs
+  const tabs = document.querySelectorAll("nav.tabs button");
+  const sections = document.querySelectorAll("section.tab");
+  tabs.forEach(b => b.addEventListener("click", () => {
+    tabs.forEach(x => x.classList.remove("active"));
+    sections.forEach(s => s.classList.remove("active"));
+    b.classList.add("active");
+    document.getElementById(b.dataset.tab).classList.add("active");
+  }));
+
+  // Modules data
+  const modules = [
+    {
+      path: "src/sync_to_readwise/cli.py", lines: 167, kind: "cli", role: "Click CLI",
+      bullets: [
+        "Subcommands: setup youtube, sync-once <source>, run (daemon)",
+        "Daemon probe-builds every source at startup; missing creds → source_skipped warning + skip",
+        "Wires APScheduler IntervalTrigger jobs + an immediate-run job per source"
+      ],
+      imports: ["core.config.load", "core.readwise.ReadwiseClient", "core.syncer.Syncer", "registry"]
+    },
+    {
+      path: "src/sync_to_readwise/registry.py", lines: 36, kind: "core", role: "Source factory registry",
+      bullets: [
+        "Maps source name → factory function (cfg, src_cfg) → Source",
+        "Single place to plug in a new source"
+      ],
+      imports: ["sources.youtube", "sources.github_stars"]
+    },
+    {
+      path: "src/sync_to_readwise/core/config.py", lines: 118, kind: "core", role: "Settings + YAML config",
+      bullets: [
+        "Settings(BaseSettings) — env-var-driven secrets via SecretStr + validation_alias",
+        "YamlConfig — per-source overrides (interval, location, tags) from data/config.yaml",
+        "load(yaml_path) returns AppConfig combining both; fail-fast on missing READWISE_TOKEN"
+      ],
+      imports: ["pydantic_settings.BaseSettings"]
+    },
+    {
+      path: "src/sync_to_readwise/core/source.py", lines: 24, kind: "core", role: "Source ABC",
+      bullets: [
+        "Defines the contract every source must implement",
+        "name, default_location, default_tags, readwise_category, fetch_candidates()"
+      ],
+      imports: ["core.item.Item"]
+    },
+    {
+      path: "src/sync_to_readwise/core/item.py", lines: 17, kind: "core", role: "Item dataclass",
+      bullets: [
+        "Frozen dataclass: url, source_name, title?, author?, summary?, published_date?, tags, image_url?"
+      ],
+      imports: []
+    },
+    {
+      path: "src/sync_to_readwise/core/readwise.py", lines: 193, kind: "core", role: "Readwise Reader v3 client",
+      bullets: [
+        "warm_cache(category) — paginated /list/, populates _known_urls",
+        "exists(url) — O(1) dedup check",
+        "create_document(item, location, tags) — POSTs /save/ with throttle",
+        "Manual retry honoring Retry-After on 429 + exponential backoff on 5xx / transport errors",
+        "SAVE_MIN_INTERVAL_S = 3.5 keeps us under documented 20/min on /save/"
+      ],
+      imports: ["httpx", "structlog", "core.item.Item"]
+    },
+    {
+      path: "src/sync_to_readwise/core/syncer.py", lines: 63, kind: "core", role: "Source → Readwise glue",
+      bullets: [
+        "sync(source, src_cfg) — warm cache, iterate candidates, dedup, push, log SyncResult",
+        "Per-item exception isolation so one bad item doesn't kill the cycle"
+      ],
+      imports: ["core.readwise.ReadwiseClient", "core.source.Source", "core.config.SourceConfig"]
+    },
+    {
+      path: "src/sync_to_readwise/core/logging.py", lines: 29, kind: "core", role: "structlog setup",
+      bullets: [
+        "ConsoleRenderer to stdout (no colors — Docker logs)",
+        "Adds level + iso timestamp + contextvars merge"
+      ],
+      imports: ["structlog"]
+    },
+    {
+      path: "src/sync_to_readwise/sources/youtube.py", lines: 180, kind: "source", role: "YouTube liked-videos source",
+      bullets: [
+        "OAuth 2.0 installed-app flow; refresh token persisted to /data/youtube_token.json",
+        "Resolves the user's likes playlist via channels.list(mine=true) → relatedPlaylists.likes",
+        "Pages playlistItems.list(part=snippet,contentDetails) at maxResults=50",
+        "Filters out 'Private video' / 'Deleted video' entries"
+      ],
+      imports: ["google_auth_oauthlib", "googleapiclient", "core.source.Source", "core.item.Item"]
+    },
+    {
+      path: "src/sync_to_readwise/sources/github_stars.py", lines: 98, kind: "source", role: "GitHub starred-repos source",
+      bullets: [
+        "GET /user/starred?sort=created (newest stars first)",
+        "Follows Link header for pagination (per_page=100)",
+        "httpx.Client scoped to fetch_candidates() — connection pool released per cycle (CodeRabbit fix)"
+      ],
+      imports: ["httpx", "core.source.Source", "core.item.Item"]
+    },
+    {
+      path: "src/sync_to_readwise/__main__.py", lines: 4, kind: "cli", role: "python -m entry point",
+      bullets: ["calls cli.main()"],
+      imports: ["cli"]
+    }
+  ];
+
+  const list = document.getElementById("modlist");
+  modules.forEach((m, i) => {
+    const row = document.createElement("div");
+    row.className = "mod"; row.dataset.idx = i;
+    const segs = m.path.split("/"); const leaf = segs.pop();
+    row.innerHTML = `
+      <div class="path mono"><span style="color:var(--muted)">${segs.join("/")}/</span><span class="leaf">${leaf}</span></div>
+      <div><span class="pill ${m.kind}">${m.kind}</span></div>
+      <div class="lc">${m.lines} lines</div>
+      <div class="arrow">›</div>
+    `;
+    const detail = document.createElement("div");
+    detail.className = "mod-detail";
+    detail.innerHTML = `
+      <div style="margin-top:10px"><b style="color:var(--text)">${m.role}</b></div>
+      <ul>${m.bullets.map(b => `<li>${b}</li>`).join("")}</ul>
+      ${m.imports.length ? `<div class="imports"><b>imports:</b> ${m.imports.map(x => `<code>${x}</code>`).join(" · ")}</div>` : ""}
+    `;
+    list.appendChild(row);
+    list.appendChild(detail);
+
+    row.addEventListener("click", () => {
+      const open = row.dataset.open === "1";
+      row.dataset.open = open ? "0" : "1";
+      detail.classList.toggle("open", !open);
+    });
+  });
+
+  document.getElementById("now").textContent = new Date().toLocaleString();
+</script>
+</body>
+</html>

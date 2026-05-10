@@ -15,6 +15,8 @@ Built-in sources:
 └──────────────┘     └────────────────┘     └────────────┘
 ```
 
+> Interactive deep dive: open [`docs/codebase-overview.html`](docs/codebase-overview.html) in a browser for a tabbed walkthrough of the architecture, modules, sync flow, and ops. Single self-contained HTML — clone the repo and open it directly (GitHub doesn't render raw HTML inline).
+
 - `Source` is an interface — adding a new source (Reddit saved, GitHub stars, etc.) is one file plus a registry entry.
 - The syncer queries Readwise to dedup; no local "what's been synced" state file.
 - Runs as a long-lived Docker container with an internal scheduler.
