@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>sync-to-readwise · status</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  /* ----- design tokens ----------------------------------------------- */
+  :root {
+    --bg:        #16130f;   /* warm near-black            */
+    --bg-raise:  #1d1812;
+    --bg-card:   #211b14;
+    --line:      #3a3024;
+    --line-soft: #2a2319;
+    --ink:       #f2e8d6;   /* warm cream                 */
+    --ink-mute:  #9d917c;
+    --ink-faint: #6a6051;
+    --amber:     #e8a33d;   /* signal: attention / brand  */
+    --green:     #8fbd5e;   /* signal: healthy            */
+    --red:       #df6b43;   /* signal: failing            */
+    --mono: 'IBM Plex Mono', ui-monospace, monospace;
+    --disp: 'Fraunces', Georgia, serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { -webkit-font-smoothing: antialiased; }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 14px;
+    line-height: 1.5;
+    min-height: 100vh;
+    /* dot grid + soft top vignette for atmosphere */
+    background-image:
+      radial-gradient(circle at 50% -10%, rgba(232,163,61,0.10), transparent 55%),
+      radial-gradient(rgba(255,255,255,0.022) 1px, transparent 1px);
+    background-size: 100% 100%, 22px 22px;
+    background-attachment: fixed;
+  }
+
+  /* faint scanline overlay */
+  body::after {
+    content: "";
+    position: fixed; inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      to bottom, rgba(0,0,0,0) 0 3px, rgba(0,0,0,0.05) 3px 4px);
+    mix-blend-mode: multiply;
+    z-index: 9;
+  }
+
+  a { color: inherit; }
+
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 28px; }
+
+  /* ----- top bar ----------------------------------------------------- */
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid var(--line);
+    padding: 18px 0;
+    position: sticky; top: 0;
+    background: linear-gradient(var(--bg), rgba(22,19,15,0.86));
+    backdrop-filter: blur(6px);
+    z-index: 10;
+  }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .mark {
+    width: 26px; height: 26px; border-radius: 50%;
+    background: conic-gradient(from 220deg, var(--amber), #5c4a2a 60%, var(--amber));
+    box-shadow: 0 0 0 1px var(--line), 0 0 16px rgba(232,163,61,0.35);
+    position: relative;
+  }
+  .mark::after {
+    content: ""; position: absolute; inset: 7px;
+    border-radius: 50%; background: var(--bg);
+  }
+  .brand b { font-weight: 600; letter-spacing: 0.14em; font-size: 13px; }
+  .brand span { color: var(--ink-faint); font-size: 13px; }
+
+  .topbar .meta {
+    display: flex; gap: 22px; align-items: center;
+    font-size: 12px; color: var(--ink-mute);
+  }
+  .topbar .meta .clock { color: var(--ink); letter-spacing: 0.06em; }
+
+  /* health pill */
+  .pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    border: 1px solid var(--line); border-radius: 100px;
+    padding: 6px 13px 6px 10px; font-size: 12px; letter-spacing: 0.04em;
+  }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--green); position: relative;
+  }
+  .dot.live::after {
+    content: ""; position: absolute; inset: -4px; border-radius: 50%;
+    border: 1px solid currentColor; color: var(--green);
+    animation: ping 2.4s ease-out infinite;
+  }
+  .dot.amber { background: var(--amber); }  .dot.amber.live::after { color: var(--amber); }
+  .dot.red   { background: var(--red); }    .dot.red.live::after   { color: var(--red); }
+  @keyframes ping {
+    0%   { transform: scale(0.6); opacity: 0.9; }
+    100% { transform: scale(2.4); opacity: 0; }
+  }
+
+  /* ----- hero -------------------------------------------------------- */
+  .hero {
+    padding: 64px 0 40px;
+    border-bottom: 1px solid var(--line-soft);
+    display: grid; grid-template-columns: 1fr auto; gap: 40px; align-items: end;
+  }
+  .hero .kicker {
+    font-size: 12px; letter-spacing: 0.3em; text-transform: uppercase;
+    color: var(--amber); margin-bottom: 18px;
+  }
+  .hero h1 {
+    font-family: var(--disp);
+    font-optical-sizing: auto;
+    font-weight: 500;
+    font-size: clamp(2.6rem, 7vw, 5.4rem);
+    line-height: 0.98;
+    letter-spacing: -0.02em;
+  }
+  .hero h1 em { font-style: italic; color: var(--amber); font-weight: 400; }
+  .hero .sub { color: var(--ink-mute); margin-top: 18px; font-size: 13px; }
+  .hero .sub b { color: var(--ink); font-weight: 500; }
+
+  .uptime {
+    text-align: right; white-space: nowrap;
+    border-left: 1px solid var(--line-soft); padding-left: 32px;
+  }
+  .uptime .n {
+    font-family: var(--disp); font-size: 3rem; font-weight: 500;
+    line-height: 1; letter-spacing: -0.02em;
+  }
+  .uptime .l {
+    font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase;
+    color: var(--ink-faint); margin-top: 8px;
+  }
+
+  /* ----- section scaffolding ---------------------------------------- */
+  section { padding: 44px 0; border-bottom: 1px solid var(--line-soft); }
+  .sec-head {
+    display: flex; align-items: baseline; gap: 14px; margin-bottom: 24px;
+  }
+  .sec-head h2 {
+    font-size: 12px; letter-spacing: 0.22em; text-transform: uppercase;
+    font-weight: 600; color: var(--ink);
+  }
+  .sec-head .rule { flex: 1; height: 1px; background: var(--line-soft); }
+  .sec-head .count { font-size: 12px; color: var(--ink-faint); }
+
+  /* ----- channel cards ---------------------------------------------- */
+  .channels { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 22px;
+    position: relative;
+    overflow: hidden;
+  }
+  /* status spine down the left edge */
+  .card::before {
+    content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+    background: var(--green);
+  }
+  .card.warn::before { background: var(--amber); }
+  .card.fail::before { background: var(--red); }
+
+  .card .row1 {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 4px;
+  }
+  .card .name {
+    font-size: 16px; font-weight: 600; letter-spacing: 0.02em;
+    display: flex; align-items: center; gap: 9px;
+  }
+  .card .state {
+    font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+    display: flex; align-items: center; gap: 7px; color: var(--ink-mute);
+  }
+  .card .schedule { font-size: 12px; color: var(--ink-faint); margin-bottom: 18px; }
+
+  /* sparkline */
+  .spark {
+    display: flex; align-items: flex-end; gap: 3px; height: 46px;
+    padding: 8px 0; margin-bottom: 16px;
+    border-bottom: 1px dashed var(--line-soft);
+  }
+  .spark i {
+    flex: 1; background: var(--line); border-radius: 1px;
+    transform-origin: bottom; animation: grow 0.7s cubic-bezier(.2,.8,.2,1) backwards;
+  }
+  .spark i.hit { background: var(--amber); box-shadow: 0 0 8px rgba(232,163,61,0.4); }
+  @keyframes grow { from { transform: scaleY(0); } }
+
+  /* counters */
+  .counters { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; }
+  .counter .v {
+    font-family: var(--disp); font-size: 1.9rem; font-weight: 500;
+    line-height: 1; letter-spacing: -0.02em;
+  }
+  .counter .k {
+    font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--ink-faint); margin-top: 6px;
+  }
+  .counter.alert .v { color: var(--red); }
+  .counter.gain  .v { color: var(--green); }
+
+  .card .foot {
+    margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line-soft);
+    display: flex; justify-content: space-between;
+    font-size: 12px; color: var(--ink-mute);
+  }
+  .card .foot b { color: var(--ink); font-weight: 500; }
+
+  /* ----- credentials ------------------------------------------------- */
+  .cred {
+    display: flex; align-items: center; gap: 20px;
+    background: var(--bg-card); border: 1px solid var(--line);
+    border-radius: 4px; padding: 18px 22px; margin-bottom: 12px;
+  }
+  .cred .icon {
+    width: 38px; height: 38px; flex: none; border-radius: 4px;
+    border: 1px solid var(--line); display: grid; place-items: center;
+    font-size: 17px;
+  }
+  .cred .body { flex: 1; min-width: 0; }
+  .cred .body .t { font-weight: 600; font-size: 14px; }
+  .cred .body .d { font-size: 12px; color: var(--ink-mute); margin-top: 2px; }
+
+  /* expiry meter */
+  .meter {
+    margin-top: 9px; height: 5px; border-radius: 3px;
+    background: var(--line-soft); overflow: hidden; max-width: 280px;
+  }
+  .meter i { display: block; height: 100%; background: var(--amber);
+             animation: fill 1.1s cubic-bezier(.2,.8,.2,1) backwards; }
+  @keyframes fill { from { width: 0 !important; } }
+
+  .cred .verdict {
+    font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+    display: flex; align-items: center; gap: 7px; white-space: nowrap;
+    color: var(--ink-mute);
+  }
+
+  .btn {
+    font-family: var(--mono); font-size: 12px; font-weight: 500;
+    letter-spacing: 0.06em; text-transform: uppercase;
+    border: 1px solid var(--amber); color: var(--bg);
+    background: var(--amber); border-radius: 3px;
+    padding: 9px 16px; cursor: pointer; white-space: nowrap;
+    transition: transform .12s ease, box-shadow .12s ease;
+    text-decoration: none; display: inline-block;
+  }
+  .btn:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(232,163,61,0.3); }
+  .btn.ghost { background: transparent; color: var(--ink-mute); border-color: var(--line); }
+  .btn.ghost:hover { color: var(--ink); box-shadow: none; border-color: var(--ink-mute); }
+
+  /* ----- activity log ----------------------------------------------- */
+  .log { display: flex; flex-direction: column; gap: 1px;
+         background: var(--line-soft); border: 1px solid var(--line);
+         border-radius: 4px; overflow: hidden; }
+  .log .ev {
+    display: grid; grid-template-columns: 90px 130px 1fr;
+    gap: 16px; padding: 11px 18px; background: var(--bg-card);
+    font-size: 12.5px; align-items: baseline;
+  }
+  .log .ev .ts { color: var(--ink-faint); }
+  .log .ev .tag {
+    font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
+    align-self: center; width: max-content;
+    padding: 3px 8px; border-radius: 3px; border: 1px solid var(--line);
+    color: var(--ink-mute);
+  }
+  .log .ev .tag.created { color: var(--green); border-color: rgba(143,189,94,0.4); }
+  .log .ev .tag.ok      { color: var(--ink-mute); }
+  .log .ev .tag.error   { color: var(--red);   border-color: rgba(223,107,67,0.5); }
+  .log .ev .msg { color: var(--ink); }
+  .log .ev .msg a { color: var(--amber); text-decoration: none;
+                    border-bottom: 1px solid rgba(232,163,61,0.3); }
+  .log .ev .msg a:hover { border-color: var(--amber); }
+  .log .ev .msg .src { color: var(--ink-faint); }
+
+  footer {
+    padding: 30px 0 50px; color: var(--ink-faint); font-size: 11px;
+    display: flex; justify-content: space-between; letter-spacing: 0.04em;
+  }
+
+  /* staggered entrance */
+  .rise { animation: rise 0.6s cubic-bezier(.2,.8,.2,1) backwards; }
+  @keyframes rise { from { opacity: 0; transform: translateY(14px); } }
+
+  @media (max-width: 740px) {
+    .hero { grid-template-columns: 1fr; }
+    .uptime { border-left: 0; padding-left: 0; text-align: left; }
+    .channels { grid-template-columns: 1fr; }
+    .log .ev { grid-template-columns: 1fr; gap: 4px; }
+    .cred { flex-wrap: wrap; }
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="wrap" style="display:flex;align-items:center;justify-content:space-between;padding:0;">
+    <div class="brand">
+      <div class="mark"></div>
+      <b>SYNC&#8202;·&#8202;TO&#8202;·&#8202;READWISE</b>
+      <span>/ status</span>
+    </div>
+    <div class="meta">
+      <span class="clock" id="clock">--:--:-- UTC</span>
+      <span class="pill"><span class="dot amber live"></span> 1 ADVISORY</span>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <!-- HERO ----------------------------------------------------------- -->
+  <div class="hero">
+    <div class="rise" style="animation-delay:.05s">
+      <div class="kicker">Daemon report</div>
+      <h1>Syncing,<br>with <em>one&nbsp;thing</em><br>to watch.</h1>
+      <p class="sub">Both channels are running on schedule. The YouTube OAuth token
+        <b>expires in 5 days</b> &mdash; re-authorize below before it lapses.</p>
+    </div>
+    <div class="uptime rise" style="animation-delay:.15s">
+      <div class="n">6d&#8202;14h</div>
+      <div class="l">Uptime</div>
+    </div>
+  </div>
+
+  <!-- CHANNELS ------------------------------------------------------- -->
+  <section class="rise" style="animation-delay:.2s">
+    <div class="sec-head">
+      <h2>Channels</h2><div class="rule"></div><span class="count">2 enabled</span>
+    </div>
+    <div class="channels">
+
+      <!-- youtube -->
+      <div class="card warn">
+        <div class="row1">
+          <div class="name">▶ youtube</div>
+          <div class="state"><span class="dot amber"></span> token expiring</div>
+        </div>
+        <div class="schedule">every 15 min · liked videos → location: later</div>
+        <div class="spark" data-spark="0,0,1,0,0,2,0,0,0,3,0,0,1,2"></div>
+        <div class="counters">
+          <div class="counter"><div class="v">249</div><div class="k">seen</div></div>
+          <div class="counter gain"><div class="v">2</div><div class="k">created</div></div>
+          <div class="counter"><div class="v">247</div><div class="k">skipped</div></div>
+          <div class="counter"><div class="v">0</div><div class="k">errors</div></div>
+        </div>
+        <div class="foot">
+          <span>last run <b>2 min ago</b></span>
+          <span>next in <b>13 min</b></span>
+        </div>
+      </div>
+
+      <!-- github stars -->
+      <div class="card">
+        <div class="row1">
+          <div class="name">★ github_stars</div>
+          <div class="state"><span class="dot"></span> healthy</div>
+        </div>
+        <div class="schedule">every 15 min · starred repos → location: later</div>
+        <div class="spark" data-spark="0,0,0,0,0,0,0,0,0,0,0,0,0,0"></div>
+        <div class="counters">
+          <div class="counter"><div class="v">145</div><div class="k">seen</div></div>
+          <div class="counter"><div class="v">0</div><div class="k">created</div></div>
+          <div class="counter"><div class="v">145</div><div class="k">skipped</div></div>
+          <div class="counter"><div class="v">0</div><div class="k">errors</div></div>
+        </div>
+        <div class="foot">
+          <span>last run <b>4 min ago</b></span>
+          <span>next in <b>11 min</b></span>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- CREDENTIALS ---------------------------------------------------- -->
+  <section class="rise" style="animation-delay:.28s">
+    <div class="sec-head">
+      <h2>Credentials</h2><div class="rule"></div><span class="count">action needed</span>
+    </div>
+
+    <div class="cred">
+      <div class="icon">▶</div>
+      <div class="body">
+        <div class="t">YouTube OAuth token</div>
+        <div class="d">Refresh token valid · expires 2026-05-22 (in 5 days)</div>
+        <div class="meter"><i style="width:28%"></i></div>
+      </div>
+      <div class="verdict"><span class="dot amber"></span> expiring</div>
+      <a class="btn" href="/auth/youtube">Re-authorize</a>
+    </div>
+
+    <div class="cred">
+      <div class="icon">★</div>
+      <div class="body">
+        <div class="t">GitHub personal access token</div>
+        <div class="d">Authenticated as @allenhutchison · classic PAT · no expiry set</div>
+      </div>
+      <div class="verdict"><span class="dot"></span> valid</div>
+      <a class="btn ghost" href="#">Details</a>
+    </div>
+
+    <div class="cred">
+      <div class="icon">◆</div>
+      <div class="body">
+        <div class="t">Readwise API token</div>
+        <div class="d">Last accepted by readwise.io · 2 min ago</div>
+      </div>
+      <div class="verdict"><span class="dot"></span> valid</div>
+      <a class="btn ghost" href="#">Details</a>
+    </div>
+  </section>
+
+  <!-- ACTIVITY ------------------------------------------------------- -->
+  <section class="rise" style="animation-delay:.36s">
+    <div class="sec-head">
+      <h2>Recent activity</h2><div class="rule"></div><span class="count">last 24h</span>
+    </div>
+    <div class="log">
+      <div class="ev">
+        <span class="ts">17:45:20</span>
+        <span class="tag ok">sync ok</span>
+        <span class="msg"><span class="src">youtube</span> &mdash; seen 249, created 2, skipped 247</span>
+      </div>
+      <div class="ev">
+        <span class="ts">17:45:19</span>
+        <span class="tag created">created</span>
+        <span class="msg"><a href="#">Trying the Most Popular Food in San Jose, CA for 24 Hours</a> <span class="src">· youtube</span></span>
+      </div>
+      <div class="ev">
+        <span class="ts">17:45:16</span>
+        <span class="tag created">created</span>
+        <span class="msg"><a href="#">Storyteller Overland GXV WILD Comprehensive Walkthrough</a> <span class="src">· youtube</span></span>
+      </div>
+      <div class="ev">
+        <span class="ts">17:45:14</span>
+        <span class="tag ok">sync ok</span>
+        <span class="msg"><span class="src">github_stars</span> &mdash; seen 145, created 0, skipped 145</span>
+      </div>
+      <div class="ev">
+        <span class="ts">15:30:41</span>
+        <span class="tag error">error</span>
+        <span class="msg">youtube refresh token expired &mdash; <span class="src">resolved by re-auth at 17:44</span></span>
+      </div>
+      <div class="ev">
+        <span class="ts">14:15:41</span>
+        <span class="tag ok">sync ok</span>
+        <span class="msg"><span class="src">github_stars</span> &mdash; seen 145, created 0, skipped 145</span>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span>sync-to-readwise · running on chowda</span>
+    <span id="refreshed">auto-refresh every 30s</span>
+  </footer>
+
+</div>
+
+<script>
+  /* live UTC clock in the top bar */
+  function tick() {
+    const d = new Date();
+    const p = n => String(n).padStart(2, '0');
+    document.getElementById('clock').textContent =
+      `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())} UTC`;
+  }
+  tick(); setInterval(tick, 1000);
+
+  /* render sparklines from data-spark="comma,separated,counts" */
+  document.querySelectorAll('.spark').forEach(el => {
+    const vals = el.dataset.spark.split(',').map(Number);
+    const max = Math.max(1, ...vals);
+    vals.forEach((v, i) => {
+      const bar = document.createElement('i');
+      bar.style.height = (12 + (v / max) * 88) + '%';
+      bar.style.animationDelay = (0.4 + i * 0.035) + 's';
+      if (v > 0) bar.classList.add('hit');
+      el.appendChild(bar);
+    });
+  });
+</script>
+
+</body>
+</html>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import signal
+from datetime import datetime
 from pathlib import Path
 
 import click
@@ -11,9 +12,12 @@ from apscheduler.triggers.interval import IntervalTrigger
 from sync_to_readwise.core.config import AppConfig, SourceConfig, load
 from sync_to_readwise.core.logging import configure_logging
 from sync_to_readwise.core.readwise import ReadwiseClient
+from sync_to_readwise.core.state import STATE_FILENAME, SyncState
 from sync_to_readwise.core.syncer import Syncer
 from sync_to_readwise.registry import REGISTRY, build_source
-from sync_to_readwise.sources.youtube import YouTubeLikesSource
+from sync_to_readwise.sources.youtube import YouTubeAuthError, YouTubeLikesSource
+from sync_to_readwise.web.app import StatusApp
+from sync_to_readwise.web.server import serve_in_thread
 
 log = structlog.get_logger(__name__)
 
@@ -48,7 +52,7 @@ def setup() -> None:
 
 
 @setup.command("youtube")
-@click.option("--port", type=int, default=8080, show_default=True)
+@click.option("--port", type=int, default=8088, show_default=True)
 @click.option(
     "--open-browser/--no-open-browser",
     default=False,
@@ -96,6 +100,39 @@ def sync_once(ctx: click.Context, source_name: str) -> None:
     )
 
 
+def _next_run_at(scheduler: BlockingScheduler, name: str) -> str | None:
+    """ISO timestamp of a job's next fire, or None if not scheduled yet."""
+    job = scheduler.get_job(name)
+    next_time = getattr(job, "next_run_time", None)
+    if isinstance(next_time, datetime):
+        return next_time.isoformat(timespec="seconds")
+    return None
+
+
+def start_web_server(cfg: AppConfig, state: SyncState) -> object | None:
+    """Start the status web server unless disabled. Returns the server or None.
+
+    The YouTube source is built solely to power the `/auth/youtube` re-auth
+    flow; if its credentials are missing the page still serves, just without
+    the re-auth route.
+    """
+    if not cfg.settings.web_enabled:
+        return None
+    youtube: YouTubeLikesSource | None = None
+    try:
+        built = build_source("youtube", cfg)
+        if isinstance(built, YouTubeLikesSource):
+            youtube = built
+    except Exception as e:
+        log.warning("web_youtube_unavailable", reason=type(e).__name__, detail=str(e))
+    app = StatusApp(
+        state=state,
+        youtube=youtube,
+        public_base_url=cfg.settings.public_base_url or None,
+    )
+    return serve_in_thread(app, cfg.settings.web_host, cfg.settings.web_port)
+
+
 @main.command("run")
 @click.pass_context
 def run_daemon(ctx: click.Context) -> None:
@@ -137,13 +174,26 @@ def run_daemon(ctx: click.Context) -> None:
     syncer = Syncer(rw)
     scheduler = BlockingScheduler()
 
+    state = SyncState(cfg.data_dir / STATE_FILENAME)
+    state.mark_daemon_started()
+    for name, src_cfg in enabled.items():
+        state.register_source(name, enabled=True, interval_minutes=src_cfg.interval_minutes)
+    start_web_server(cfg, state)
+
     def _run_source(name: str) -> None:
         try:
             source = build_source(name, cfg)
             src_cfg = cfg.source_config(name)
-            syncer.sync(source, src_cfg)
-        except Exception:
+            result = syncer.sync(source, src_cfg)
+            state.record_success(result, next_run_at=_next_run_at(scheduler, name))
+        except Exception as exc:
             log.exception("scheduled_sync_failed", source=name)
+            state.record_failure(
+                name,
+                error=f"{type(exc).__name__}: {exc}",
+                auth_failed=isinstance(exc, YouTubeAuthError),
+                next_run_at=_next_run_at(scheduler, name),
+            )
 
     for name, src_cfg in enabled.items():
         trigger = IntervalTrigger(minutes=src_cfg.interval_minutes)

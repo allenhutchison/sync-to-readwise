@@ -81,9 +81,9 @@ doppler run -- docker compose run --rm --service-ports sync-to-readwise \
     sync-to-readwise setup youtube
 ```
 
-A browser window opens. Grant access; the redirect lands on `http://localhost:8080/...` and the refresh token is written to `data/youtube_token.json`.
+A browser window opens. Grant access; the redirect lands on `http://localhost:8088/...` and the refresh token is written to `data/youtube_token.json`.
 
-> **Why `--service-ports`**: by default `docker compose run` doesn't publish ports. The OAuth redirect needs port 8080 reachable from your browser.
+> **Why `--service-ports`**: by default `docker compose run` doesn't publish ports. The OAuth redirect needs port 8088 reachable from your browser.
 
 > **Note**: the refresh token is intentionally **not** stored in Doppler. It's only useful when paired with the OAuth client secret (which *is* in Doppler), so a leaked volume on its own can't refresh tokens. It's also machine state, not config.
 
@@ -126,6 +126,31 @@ doppler run -- docker compose run --rm sync-to-readwise \
     sync-to-readwise sync-once youtube
 ```
 
+## Status page
+
+The daemon serves a status page on port 8088 (`http://<host>:8088/`) showing
+each channel's last/next sync, counters, recent activity, and credential
+health. Other routes: `/api/status` (JSON), `/healthz` (liveness).
+
+Disable it with `SYNCRW_WEB_ENABLED=false`, or change the bind with
+`SYNCRW_WEB_HOST` / `SYNCRW_WEB_PORT`.
+
+### Browser-based YouTube re-authorization
+
+When the YouTube refresh token expires or is revoked, the status page flags it
+and links to `/auth/youtube`, which runs the OAuth flow in your browser — no
+SSH or `docker exec` needed.
+
+This requires a Google Cloud OAuth client of type **"Web application"** (the
+`setup youtube` CLI uses a "Desktop app" client, which only allows `localhost`
+redirects). Register the callback URL as an authorized redirect URI:
+
+- `http://<host>:8088/auth/youtube/callback`
+
+Set `SYNCRW_PUBLIC_BASE_URL` (e.g. `http://chowda:8088`) so the redirect URI
+matches exactly what's registered; if unset, it's derived from the request's
+`Host` header.
+
 ## Adding a new source
 
 1. Create `src/sync_to_readwise/sources/<name>.py` implementing `Source`:
@@ -164,6 +189,10 @@ Environment (Doppler / `.env`):
 | `YOUTUBE_OAUTH_CLIENT_SECRET`  | yes      | "                                                  |
 | `SYNCRW_LOG_LEVEL`             | no       | Default `INFO`.                                    |
 | `SYNCRW_DATA_DIR`              | no       | Default `/data`.                                   |
+| `SYNCRW_WEB_ENABLED`           | no       | Default `true`. Serve the status page.             |
+| `SYNCRW_WEB_HOST`              | no       | Default `0.0.0.0`.                                 |
+| `SYNCRW_WEB_PORT`              | no       | Default `8088`.                                    |
+| `SYNCRW_PUBLIC_BASE_URL`       | no       | e.g. `http://chowda:8088`; OAuth redirect base.    |
 | `DOPPLER_TOKEN`                | prod     | Service token; entrypoint calls `doppler run` when present.       |
 
 ## CI / publishing

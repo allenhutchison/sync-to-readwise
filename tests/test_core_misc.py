@@ -149,7 +149,14 @@ class TestSyncer:
     def test_sync_result_dataclass_shape(self) -> None:
         # Trivial guard so renaming a field shows up in tests.
         r = SyncResult(source="s", seen=1, created=1, skipped=0, errors=0)
-        assert r.__dict__ == {"source": "s", "seen": 1, "created": 1, "skipped": 0, "errors": 0}
+        assert r.__dict__ == {
+            "source": "s",
+            "seen": 1,
+            "created": 1,
+            "skipped": 0,
+            "errors": 0,
+            "created_items": [],
+        }
 
 
 class TestConfigureLogging:

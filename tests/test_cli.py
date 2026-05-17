@@ -28,6 +28,10 @@ def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     monkeypatch.setenv("YOUTUBE_OAUTH_CLIENT_ID", "cid")
     monkeypatch.setenv("YOUTUBE_OAUTH_CLIENT_SECRET", "cs")
     monkeypatch.setenv("GITHUB_TOKEN", "gh")
+    # Keep daemon state writes inside the test's tmp dir, and don't bind a
+    # real web server during CLI tests — start_web_server gets its own tests.
+    monkeypatch.setenv("SYNCRW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("SYNCRW_WEB_ENABLED", "false")
     return tmp_path
 
 
@@ -238,3 +242,65 @@ class TestRunDaemon:
         # Invoking the handler triggers scheduler.shutdown + rw.close.
         captured_signals[_signal_mod.SIGTERM]()
         scheduler.shutdown.assert_called_once_with(wait=False)
+
+
+class TestNextRunAt:
+    def test_returns_iso_for_datetime(self) -> None:
+        from datetime import UTC, datetime
+
+        scheduler = MagicMock()
+        job = MagicMock()
+        job.next_run_time = datetime(2026, 5, 17, 18, 0, 0, tzinfo=UTC)
+        scheduler.get_job.return_value = job
+        assert cli_mod._next_run_at(scheduler, "x") == "2026-05-17T18:00:00+00:00"
+
+    def test_none_when_no_job(self) -> None:
+        scheduler = MagicMock()
+        scheduler.get_job.return_value = None
+        assert cli_mod._next_run_at(scheduler, "x") is None
+
+    def test_none_when_next_time_unset(self) -> None:
+        scheduler = MagicMock()
+        job = MagicMock()
+        job.next_run_time = None
+        scheduler.get_job.return_value = job
+        assert cli_mod._next_run_at(scheduler, "x") is None
+
+
+class TestStartWebServer:
+    def _cfg_and_state(self, env: Path):
+        from sync_to_readwise.core.config import load
+        from sync_to_readwise.core.state import STATE_FILENAME, SyncState
+
+        cfg = load(env / "missing.yaml")
+        state = SyncState(env / STATE_FILENAME)
+        return cfg, state
+
+    def test_disabled_returns_none(self, env: Path) -> None:
+        # The env fixture sets SYNCRW_WEB_ENABLED=false.
+        cfg, state = self._cfg_and_state(env)
+        assert cli_mod.start_web_server(cfg, state) is None
+
+    def test_enabled_starts_server_with_youtube(
+        self, env: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SYNCRW_WEB_ENABLED", "true")
+        cfg, state = self._cfg_and_state(env)
+        with patch.object(cli_mod, "serve_in_thread") as serve:
+            cli_mod.start_web_server(cfg, state)
+        serve.assert_called_once()
+        app = serve.call_args[0][0]
+        assert app._youtube is not None  # client creds present in env fixture
+
+    def test_enabled_without_youtube_creds(
+        self, env: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SYNCRW_WEB_ENABLED", "true")
+        # No YouTube client creds → build_source raises → page serves anyway.
+        monkeypatch.delenv("YOUTUBE_OAUTH_CLIENT_ID", raising=False)
+        monkeypatch.delenv("YOUTUBE_OAUTH_CLIENT_SECRET", raising=False)
+        cfg, state = self._cfg_and_state(env)
+        with patch.object(cli_mod, "serve_in_thread") as serve:
+            cli_mod.start_web_server(cfg, state)
+        app = serve.call_args[0][0]
+        assert app._youtube is None

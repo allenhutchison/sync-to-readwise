@@ -236,8 +236,66 @@ class TestLoadCredentials:
 
         with patch.object(youtube_mod, "Credentials") as credentials_cls:
             credentials_cls.from_authorized_user_info.return_value = creds
-            with pytest.raises(RuntimeError, match="invalid and not refreshable"):
+            with pytest.raises(youtube_mod.YouTubeAuthError, match="invalid and not refreshable"):
                 src._load_credentials()
+
+    def test_refresh_error_raises_auth_error(self, tmp_path: Path) -> None:
+        # A google-auth RefreshError (expired/revoked token) is translated into
+        # an actionable YouTubeAuthError instead of bubbling up raw.
+        src = _src(tmp_path)
+        src.token_path.write_text(json.dumps({"refresh_token": "r"}))
+
+        creds = MagicMock()
+        creds.valid = False
+        creds.expired = True
+        creds.refresh_token = "r"
+        creds.refresh.side_effect = youtube_mod.RefreshError("invalid_grant")
+
+        with (
+            patch.object(youtube_mod, "Credentials") as credentials_cls,
+            patch.object(youtube_mod, "Request"),
+        ):
+            credentials_cls.from_authorized_user_info.return_value = creds
+            with pytest.raises(youtube_mod.YouTubeAuthError, match="expired or revoked"):
+                src._load_credentials()
+
+
+class TestWebOauth:
+    def test_web_client_config_shape(self, tmp_path: Path) -> None:
+        redirect = "http://chowda:8080/auth/youtube/callback"
+        cfg = _src(tmp_path)._web_client_config(redirect)
+        web = cfg["web"]
+        assert web["client_id"] == "cid"
+        assert web["client_secret"] == "csecret"
+        assert web["redirect_uris"] == [redirect]
+        assert web["token_uri"].startswith("https://oauth2.googleapis.com")
+
+    def test_authorization_url(self, tmp_path: Path) -> None:
+        flow = MagicMock()
+        flow.authorization_url.return_value = ("https://consent.example", "STATE9")
+
+        src = _src(tmp_path)
+        with patch.object(youtube_mod, "Flow") as flow_cls:
+            flow_cls.from_client_config.return_value = flow
+            url, oauth_state = src.web_authorization_url("http://h/auth/youtube/callback")
+
+        assert url == "https://consent.example"
+        assert oauth_state == "STATE9"
+        flow.authorization_url.assert_called_once_with(access_type="offline", prompt="consent")
+
+    def test_finish_web_authorization_saves_token(self, tmp_path: Path) -> None:
+        creds = MagicMock()
+        creds.to_json.return_value = json.dumps({"refresh_token": "fresh"})
+        flow = MagicMock()
+        flow.credentials = creds
+
+        src = _src(tmp_path)
+        with patch.object(youtube_mod, "Flow") as flow_cls:
+            flow_cls.from_client_config.return_value = flow
+            src.finish_web_authorization("http://h/auth/youtube/callback", "STATE9", "CODE")
+
+        flow.fetch_token.assert_called_once_with(code="CODE")
+        assert json.loads(src.token_path.read_text()) == {"refresh_token": "fresh"}
 
 
 class TestGetLikesPlaylistId:
