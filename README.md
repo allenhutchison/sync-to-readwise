@@ -81,9 +81,9 @@ doppler run -- docker compose run --rm --service-ports sync-to-readwise \
     sync-to-readwise setup youtube
 ```
 
-A browser window opens. Grant access; the redirect lands on `http://localhost:8080/...` and the refresh token is written to `data/youtube_token.json`.
+A browser window opens. Grant access; the redirect lands on `http://localhost:8088/...` and the refresh token is written to `data/youtube_token.json`.
 
-> **Why `--service-ports`**: by default `docker compose run` doesn't publish ports. The OAuth redirect needs port 8080 reachable from your browser.
+> **Why `--service-ports`**: by default `docker compose run` doesn't publish ports. The OAuth redirect needs port 8088 reachable from your browser.
 
 > **Note**: the refresh token is intentionally **not** stored in Doppler. It's only useful when paired with the OAuth client secret (which *is* in Doppler), so a leaked volume on its own can't refresh tokens. It's also machine state, not config.
 
@@ -128,7 +128,7 @@ doppler run -- docker compose run --rm sync-to-readwise \
 
 ## Status page
 
-The daemon serves a status page on port 8080 (`http://<host>:8080/`) showing
+The daemon serves a status page on port 8088 (`http://<host>:8088/`) showing
 each channel's last/next sync, counters, recent activity, and credential
 health. Other routes: `/api/status` (JSON), `/healthz` (liveness).
 
@@ -145,9 +145,9 @@ This requires a Google Cloud OAuth client of type **"Web application"** (the
 `setup youtube` CLI uses a "Desktop app" client, which only allows `localhost`
 redirects). Register the callback URL as an authorized redirect URI:
 
-- `http://<host>:8080/auth/youtube/callback`
+- `http://<host>:8088/auth/youtube/callback`
 
-Set `SYNCRW_PUBLIC_BASE_URL` (e.g. `http://chowda:8080`) so the redirect URI
+Set `SYNCRW_PUBLIC_BASE_URL` (e.g. `http://chowda:8088`) so the redirect URI
 matches exactly what's registered; if unset, it's derived from the request's
 `Host` header.
 
@@ -191,8 +191,8 @@ Environment (Doppler / `.env`):
 | `SYNCRW_DATA_DIR`              | no       | Default `/data`.                                   |
 | `SYNCRW_WEB_ENABLED`           | no       | Default `true`. Serve the status page.             |
 | `SYNCRW_WEB_HOST`              | no       | Default `0.0.0.0`.                                 |
-| `SYNCRW_WEB_PORT`              | no       | Default `8080`.                                    |
-| `SYNCRW_PUBLIC_BASE_URL`       | no       | e.g. `http://chowda:8080`; OAuth redirect base.    |
+| `SYNCRW_WEB_PORT`              | no       | Default `8088`.                                    |
+| `SYNCRW_PUBLIC_BASE_URL`       | no       | e.g. `http://chowda:8088`; OAuth redirect base.    |
 | `DOPPLER_TOKEN`                | prod     | Service token; entrypoint calls `doppler run` when present.       |
 
 ## CI / publishing

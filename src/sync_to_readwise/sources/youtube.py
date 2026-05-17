@@ -127,7 +127,7 @@ class YouTubeLikesSource(Source):
         self._save_credentials(flow.credentials)
         log.info("youtube_oauth_complete", token_path=str(self.token_path))
 
-    def run_oauth_setup(self, *, port: int = 8080, open_browser: bool = False) -> None:
+    def run_oauth_setup(self, *, port: int = 8088, open_browser: bool = False) -> None:
         """Run the interactive OAuth installed-app flow and persist the refresh token.
 
         Inside Docker we can't open the host's browser, and we need to bind the

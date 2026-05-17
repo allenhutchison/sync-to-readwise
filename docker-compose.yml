@@ -18,8 +18,9 @@ services:
       - GITHUB_TOKEN
     volumes:
       - ./data:/data
-    # For one-time OAuth setup, override the command and map a port:
+    # Publishes the status page (http://localhost:8088/). The same port is
+    # reused by the one-time OAuth setup callback server:
     #   doppler run -- docker compose run --rm --service-ports \
     #       sync-to-readwise sync-to-readwise setup youtube
     ports:
-      - "8080:8080"
+      - "8088:8088"

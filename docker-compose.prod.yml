@@ -23,6 +23,11 @@ services:
       DOPPLER_TOKEN: ${DOPPLER_TOKEN:?Missing DOPPLER_TOKEN (service token scoped to sync-to-readwise/prod)}
       SYNCRW_LOG_LEVEL: INFO
       SYNCRW_DATA_DIR: /data
+    # Publishes the status page and the /auth/youtube re-auth flow. Set
+    # SYNCRW_PUBLIC_BASE_URL (in Doppler) to the URL browsers use, e.g.
+    # http://chowda:8088, so the OAuth redirect URI matches what's registered.
+    ports:
+      - "8088:8088"
     volumes:
       - sync-to-readwise-data:/data
 

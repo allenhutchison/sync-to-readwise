@@ -52,7 +52,7 @@ def setup() -> None:
 
 
 @setup.command("youtube")
-@click.option("--port", type=int, default=8080, show_default=True)
+@click.option("--port", type=int, default=8088, show_default=True)
 @click.option(
     "--open-browser/--no-open-browser",
     default=False,

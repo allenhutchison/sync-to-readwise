@@ -44,9 +44,9 @@ class Settings(BaseSettings):
     # Status web server (SYNCRW_-prefixed: SYNCRW_WEB_ENABLED, SYNCRW_WEB_PORT, ...)
     web_enabled: bool = True
     web_host: str = "0.0.0.0"
-    web_port: int = 8080
+    web_port: int = 8088
     # Public base URL the browser uses to reach the status page, e.g.
-    # "http://chowda:8080". Used to build the OAuth redirect URI; must match an
+    # "http://chowda:8088". Used to build the OAuth redirect URI; must match an
     # authorized redirect URI on the Google "Web application" OAuth client.
     # Empty = derive it from the request's Host header.
     public_base_url: str = ""
