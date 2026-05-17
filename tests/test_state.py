@@ -77,9 +77,7 @@ class TestMutations:
     def test_record_success(self, tmp_path: Path) -> None:
         s = _state(tmp_path)
         item = Item(url="https://y/1", source_name="youtube", title="A Video")
-        s.record_success(
-            _result(created=1, items=[item]), next_run_at="2026-01-01T00:15:00+00:00"
-        )
+        s.record_success(_result(created=1, items=[item]), next_run_at="2026-01-01T00:15:00+00:00")
         src = s.snapshot()["sources"]["youtube"]
         assert src["last_status"] == "ok"
         assert src["last_error"] is None

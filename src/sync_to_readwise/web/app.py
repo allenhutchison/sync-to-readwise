@@ -95,21 +95,15 @@ class StatusApp:
             auth_url, oauth_state = self._youtube.web_authorization_url(redirect_uri)
         except Exception as e:
             log.exception("youtube_auth_start_failed")
-            return _html(
-                500, render_message("Could not start authorization", str(e), link=_BACK)
-            )
+            return _html(500, render_message("Could not start authorization", str(e), link=_BACK))
         self._pending[oauth_state] = redirect_uri
         return Response(302, "text/plain; charset=utf-8", b"", headers={"Location": auth_url})
 
     def _auth_callback(self, query: dict[str, str], host: str) -> Response:
         if self._youtube is None:
-            return _html(
-                503, render_message("YouTube not configured", "Re-auth is unavailable.")
-            )
+            return _html(503, render_message("YouTube not configured", "Re-auth is unavailable."))
         if query.get("error"):
-            return _html(
-                400, render_message("Authorization declined", query["error"], link=_BACK)
-            )
+            return _html(400, render_message("Authorization declined", query["error"], link=_BACK))
         code = query.get("code")
         oauth_state = query.get("state")
         if not code or not oauth_state:

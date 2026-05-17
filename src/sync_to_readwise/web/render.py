@@ -215,7 +215,7 @@ def _uptime(value: str | None, now: datetime) -> str:
 
 def _document(title: str, body: str) -> str:
     return (
-        "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"UTF-8\">"
+        '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
         f"<title>{_esc(title)}</title>{_FONTS}"
         f"<style>{_CSS}</style></head><body>{body}</body></html>"
@@ -231,7 +231,7 @@ def _sparkline(history: list[int]) -> str:
     bars = []
     for value in history:
         height = 8 + (value / peak) * 92
-        cls = " class=\"hit\"" if value > 0 else ""
+        cls = ' class="hit"' if value > 0 else ""
         bars.append(f'<i{cls} style="height:{height:.0f}%"></i>')
     return f'<div class="spark">{"".join(bars)}</div>'
 
@@ -375,9 +375,7 @@ def render_status_page(snapshot: dict, *, now: datetime | None = None) -> str:
     pill, hero = _hero(sources, now, snapshot.get("daemon_started_at"))
 
     if sources:
-        cards = "".join(
-            _channel_card(name, sources[name], now) for name in sorted(sources)
-        )
+        cards = "".join(_channel_card(name, sources[name], now) for name in sorted(sources))
         channels = f'<div class="channels">{cards}</div>'
     else:
         channels = '<p class="empty">No sources are enabled.</p>'
@@ -399,7 +397,7 @@ def render_status_page(snapshot: dict, *, now: datetime | None = None) -> str:
         '<section><div class="sec-head"><h2>Recent activity</h2>'
         f'<div class="rule"></div><span class="count">{len(events)} events</span></div>'
         f"{log}</section>"
-        '<footer><span>sync-to-readwise status</span>'
+        "<footer><span>sync-to-readwise status</span>"
         "<span>auto-refreshes every 30s</span></footer></div>"
         f"{_CLOCK_JS}"
     )
@@ -415,7 +413,6 @@ def render_message(title: str, detail: str, *, link: tuple[str, str] | None = No
         label, href = link
         link_html = f'<a class="btn" href="{_esc(href)}">{_esc(label)}</a>'
     body = (
-        f'<div class="notice">{_MARK}<h1>{_esc(title)}</h1>'
-        f"<p>{_esc(detail)}</p>{link_html}</div>"
+        f'<div class="notice">{_MARK}<h1>{_esc(title)}</h1><p>{_esc(detail)}</p>{link_html}</div>'
     )
     return _document(f"{title} · sync-to-readwise", body)

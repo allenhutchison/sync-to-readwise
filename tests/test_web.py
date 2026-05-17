@@ -287,9 +287,7 @@ class TestAuthStart:
         resp = app.dispatch("GET", "/auth/youtube", {}, "chowda:8080")
         assert resp.status == 302
         assert resp.headers["Location"] == "https://accounts.google/auth"
-        yt.web_authorization_url.assert_called_once_with(
-            "http://chowda:8080/auth/youtube/callback"
-        )
+        yt.web_authorization_url.assert_called_once_with("http://chowda:8080/auth/youtube/callback")
         assert app._pending["STATE1"] == "http://chowda:8080/auth/youtube/callback"
 
     def test_uses_public_base_url_over_host(self, tmp_path: Path) -> None:
@@ -297,9 +295,7 @@ class TestAuthStart:
         yt.web_authorization_url.return_value = ("u", "s")
         app = _app(tmp_path, youtube=yt, public_base_url="http://chowda:8080/")
         app.dispatch("GET", "/auth/youtube", {}, "ignored-host")
-        yt.web_authorization_url.assert_called_once_with(
-            "http://chowda:8080/auth/youtube/callback"
-        )
+        yt.web_authorization_url.assert_called_once_with("http://chowda:8080/auth/youtube/callback")
 
     def test_error_returns_500(self, tmp_path: Path) -> None:
         yt = MagicMock()

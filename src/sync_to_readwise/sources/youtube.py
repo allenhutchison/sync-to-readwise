@@ -109,9 +109,7 @@ class YouTubeLikesSource(Source):
             scopes=YOUTUBE_SCOPES,
             redirect_uri=redirect_uri,
         )
-        auth_url, oauth_state = flow.authorization_url(
-            access_type="offline", prompt="consent"
-        )
+        auth_url, oauth_state = flow.authorization_url(access_type="offline", prompt="consent")
         return auth_url, oauth_state
 
     def finish_web_authorization(self, redirect_uri: str, oauth_state: str, code: str) -> None:
