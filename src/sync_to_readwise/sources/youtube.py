@@ -95,11 +95,15 @@ class YouTubeLikesSource(Source):
             }
         }
 
-    def web_authorization_url(self, redirect_uri: str) -> tuple[str, str]:
-        """Begin the browser OAuth flow; return (google_consent_url, oauth_state).
+    def web_authorization_url(self, redirect_uri: str) -> tuple[str, str, str]:
+        """Begin the browser OAuth flow.
 
-        The caller redirects the user to the consent URL and must remember
-        `oauth_state` to validate the matching callback.
+        Returns ``(consent_url, oauth_state, code_verifier)``. The caller
+        redirects the user to the consent URL and must persist both
+        ``oauth_state`` and ``code_verifier``, handing them back to
+        :meth:`finish_web_authorization`. The PKCE ``code_verifier`` is the
+        secret half of the ``code_challenge`` baked into the consent URL —
+        the token exchange fails with ``invalid_grant`` without it.
         """
         # The status page is served over plain HTTP on a homelab host; oauthlib
         # otherwise refuses a non-HTTPS redirect URI.
@@ -108,18 +112,28 @@ class YouTubeLikesSource(Source):
             self._web_client_config(redirect_uri),
             scopes=YOUTUBE_SCOPES,
             redirect_uri=redirect_uri,
+            autogenerate_code_verifier=True,
         )
+        # authorization_url() generates flow.code_verifier and embeds the
+        # matching code_challenge in the URL — read the verifier afterwards.
         auth_url, oauth_state = flow.authorization_url(access_type="offline", prompt="consent")
-        return auth_url, oauth_state
+        return auth_url, oauth_state, flow.code_verifier
 
-    def finish_web_authorization(self, redirect_uri: str, oauth_state: str, code: str) -> None:
-        """Complete the browser OAuth flow: exchange `code` and persist the token."""
+    def finish_web_authorization(
+        self, redirect_uri: str, oauth_state: str, code: str, code_verifier: str
+    ) -> None:
+        """Complete the browser OAuth flow: exchange `code` and persist the token.
+
+        `code_verifier` must be the value returned by the matching
+        :meth:`web_authorization_url` call — it satisfies the PKCE challenge.
+        """
         os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
         flow = Flow.from_client_config(
             self._web_client_config(redirect_uri),
             scopes=YOUTUBE_SCOPES,
             state=oauth_state,
             redirect_uri=redirect_uri,
+            code_verifier=code_verifier,
         )
         flow.fetch_token(code=code)
         self._save_credentials(flow.credentials)

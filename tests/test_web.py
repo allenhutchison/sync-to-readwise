@@ -292,17 +292,25 @@ class TestAuthStart:
 
     def test_redirects_to_google(self, tmp_path: Path) -> None:
         yt = MagicMock()
-        yt.web_authorization_url.return_value = ("https://accounts.google/auth", "STATE1")
+        yt.web_authorization_url.return_value = (
+            "https://accounts.google/auth",
+            "STATE1",
+            "VERIFIER1",
+        )
         app = _app(tmp_path, youtube=yt)
         resp = app.dispatch("GET", "/auth/youtube", {}, "chowda:8080")
         assert resp.status == 302
         assert resp.headers["Location"] == "https://accounts.google/auth"
         yt.web_authorization_url.assert_called_once_with("http://chowda:8080/auth/youtube/callback")
-        assert app._pending["STATE1"] == "http://chowda:8080/auth/youtube/callback"
+        # State maps to (redirect_uri, code_verifier) for the callback.
+        assert app._pending["STATE1"] == (
+            "http://chowda:8080/auth/youtube/callback",
+            "VERIFIER1",
+        )
 
     def test_uses_public_base_url_over_host(self, tmp_path: Path) -> None:
         yt = MagicMock()
-        yt.web_authorization_url.return_value = ("u", "s")
+        yt.web_authorization_url.return_value = ("u", "s", "v")
         app = _app(tmp_path, youtube=yt, public_base_url="http://chowda:8080/")
         app.dispatch("GET", "/auth/youtube", {}, "ignored-host")
         yt.web_authorization_url.assert_called_once_with("http://chowda:8080/auth/youtube/callback")
@@ -317,7 +325,7 @@ class TestAuthStart:
 class TestAuthCallback:
     def _started_app(self, tmp_path: Path) -> tuple[StatusApp, MagicMock]:
         yt = MagicMock()
-        yt.web_authorization_url.return_value = ("u", "STATE1")
+        yt.web_authorization_url.return_value = ("u", "STATE1", "VERIFIER1")
         app = _app(tmp_path, youtube=yt)
         app.dispatch("GET", "/auth/youtube", {}, "chowda")  # populates _pending
         return app, yt
@@ -328,8 +336,9 @@ class TestAuthCallback:
             "GET", "/auth/youtube/callback", {"code": "CODE", "state": "STATE1"}, "chowda"
         )
         assert resp.status == 200
+        # The stored PKCE verifier is passed through to the token exchange.
         yt.finish_web_authorization.assert_called_once_with(
-            "http://chowda/auth/youtube/callback", "STATE1", "CODE"
+            "http://chowda/auth/youtube/callback", "STATE1", "CODE", "VERIFIER1"
         )
         assert "STATE1" not in app._pending  # consumed
 

@@ -51,9 +51,10 @@ class StatusApp:
         self._state = state
         self._youtube = youtube
         self._public_base_url = public_base_url.rstrip("/") if public_base_url else None
-        # oauth_state -> redirect_uri, recorded at /auth/youtube and consumed
-        # by the matching callback to bind the two halves of the flow.
-        self._pending: dict[str, str] = {}
+        # oauth_state -> (redirect_uri, code_verifier), recorded at /auth/youtube
+        # and consumed by the matching callback to bind the two halves of the
+        # flow. The code_verifier satisfies the PKCE challenge at token exchange.
+        self._pending: dict[str, tuple[str, str]] = {}
 
     def dispatch(self, method: str, path: str, query: dict[str, str], host: str) -> Response:
         if method not in ("GET", "HEAD"):
@@ -92,11 +93,11 @@ class StatusApp:
             )
         redirect_uri = self._redirect_uri(host)
         try:
-            auth_url, oauth_state = self._youtube.web_authorization_url(redirect_uri)
+            auth_url, oauth_state, code_verifier = self._youtube.web_authorization_url(redirect_uri)
         except Exception as e:
             log.exception("youtube_auth_start_failed")
             return _html(500, render_message("Could not start authorization", str(e), link=_BACK))
-        self._pending[oauth_state] = redirect_uri
+        self._pending[oauth_state] = (redirect_uri, code_verifier)
         return Response(302, "text/plain; charset=utf-8", b"", headers={"Location": auth_url})
 
     def _auth_callback(self, query: dict[str, str], host: str) -> Response:
@@ -113,8 +114,8 @@ class StatusApp:
                     "Invalid callback", "The request is missing a code or state.", link=_BACK
                 ),
             )
-        redirect_uri = self._pending.pop(oauth_state, None)
-        if redirect_uri is None:
+        pending = self._pending.pop(oauth_state, None)
+        if pending is None:
             return _html(
                 400,
                 render_message(
@@ -123,8 +124,9 @@ class StatusApp:
                     link=("Re-authorize", "/auth/youtube"),
                 ),
             )
+        redirect_uri, code_verifier = pending
         try:
-            self._youtube.finish_web_authorization(redirect_uri, oauth_state, code)
+            self._youtube.finish_web_authorization(redirect_uri, oauth_state, code, code_verifier)
         except Exception as e:
             log.exception("youtube_auth_finish_failed")
             return _html(
