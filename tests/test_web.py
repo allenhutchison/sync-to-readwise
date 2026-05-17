@@ -136,6 +136,16 @@ class TestRenderStatusPage:
         assert "https://youtu.be/v" in html
         assert "token revoked" in html
 
+    def test_enabled_count_excludes_disabled(self) -> None:
+        snap = _healthy_snapshot()
+        snap["sources"]["youtube"] = {
+            **snap["sources"]["github_stars"],
+            "enabled": False,
+        }
+        html = render_status_page(snap, now=NOW)
+        # Two sources persisted, one disabled → header reads "1 enabled".
+        assert "1 enabled" in html
+
     def test_multiple_failing(self) -> None:
         def _failing() -> dict:
             return {
@@ -364,7 +374,7 @@ class TestServer:
         server = serve_in_thread(_app(tmp_path), "127.0.0.1", 0)
         try:
             port = server.server_address[1]
-            conn = http.client.HTTPConnection("127.0.0.1", port)
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
 
             conn.request("GET", "/healthz")
             resp = conn.getresponse()
