@@ -371,6 +371,9 @@ def render_status_page(snapshot: dict, *, now: datetime | None = None) -> str:
     now = now or datetime.now(UTC)
     sources = snapshot.get("sources", {})
     events = snapshot.get("recent_events", [])
+    # A source disabled after a prior run keeps its persisted entry — count
+    # only the ones currently enabled.
+    enabled_count = sum(1 for s in sources.values() if s.get("enabled", True))
 
     pill, hero = _hero(sources, now, snapshot.get("daemon_started_at"))
 
@@ -392,7 +395,7 @@ def render_status_page(snapshot: dict, *, now: datetime | None = None) -> str:
         f"{pill}</div></div>"
         f'<div class="wrap">{hero}'
         '<section><div class="sec-head"><h2>Channels</h2><div class="rule"></div>'
-        f'<span class="count">{len(sources)} enabled</span></div>{channels}</section>'
+        f'<span class="count">{enabled_count} enabled</span></div>{channels}</section>'
         f"{_credentials(sources, now)}"
         '<section><div class="sec-head"><h2>Recent activity</h2>'
         f'<div class="rule"></div><span class="count">{len(events)} events</span></div>'
