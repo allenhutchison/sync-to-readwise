@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Iterable
 from pathlib import Path
 
 import structlog
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
+from google_auth_oauthlib.flow import Flow, InstalledAppFlow
 from googleapiclient.discovery import build
 
 from sync_to_readwise.core.item import Item
@@ -17,6 +19,16 @@ log = structlog.get_logger(__name__)
 
 YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube.readonly"]
 TOKEN_FILENAME = "youtube_token.json"
+CALLBACK_PATH = "/auth/youtube/callback"
+
+
+class YouTubeAuthError(RuntimeError):
+    """The stored YouTube credentials are unusable and need re-authorization.
+
+    Raised in place of a raw google-auth `RefreshError` so callers (the daemon,
+    the status page) can recognize an auth failure and surface an actionable
+    "re-authorize" message instead of a stack trace.
+    """
 
 
 class YouTubeLikesSource(Source):
@@ -65,6 +77,56 @@ class YouTubeLikesSource(Source):
             }
         }
 
+    def _web_client_config(self, redirect_uri: str) -> dict:
+        """Client config for the browser-driven (`web`) OAuth flow.
+
+        Unlike the installed-app flow, this needs a Google Cloud OAuth client
+        of type "Web application" with `redirect_uri` registered as an
+        authorized redirect URI.
+        """
+        return {
+            "web": {
+                "client_id": self._client_id,
+                "client_secret": self._client_secret,
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+                "redirect_uris": [redirect_uri],
+            }
+        }
+
+    def web_authorization_url(self, redirect_uri: str) -> tuple[str, str]:
+        """Begin the browser OAuth flow; return (google_consent_url, oauth_state).
+
+        The caller redirects the user to the consent URL and must remember
+        `oauth_state` to validate the matching callback.
+        """
+        # The status page is served over plain HTTP on a homelab host; oauthlib
+        # otherwise refuses a non-HTTPS redirect URI.
+        os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
+        flow = Flow.from_client_config(
+            self._web_client_config(redirect_uri),
+            scopes=YOUTUBE_SCOPES,
+            redirect_uri=redirect_uri,
+        )
+        auth_url, oauth_state = flow.authorization_url(
+            access_type="offline", prompt="consent"
+        )
+        return auth_url, oauth_state
+
+    def finish_web_authorization(self, redirect_uri: str, oauth_state: str, code: str) -> None:
+        """Complete the browser OAuth flow: exchange `code` and persist the token."""
+        os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
+        flow = Flow.from_client_config(
+            self._web_client_config(redirect_uri),
+            scopes=YOUTUBE_SCOPES,
+            state=oauth_state,
+            redirect_uri=redirect_uri,
+        )
+        flow.fetch_token(code=code)
+        self._save_credentials(flow.credentials)
+        log.info("youtube_oauth_complete", token_path=str(self.token_path))
+
     def run_oauth_setup(self, *, port: int = 8080, open_browser: bool = False) -> None:
         """Run the interactive OAuth installed-app flow and persist the refresh token.
 
@@ -99,10 +161,21 @@ class YouTubeLikesSource(Source):
         creds = Credentials.from_authorized_user_info(data, YOUTUBE_SCOPES)
         if not creds.valid:
             if creds.expired and creds.refresh_token:
-                creds.refresh(Request())
+                try:
+                    creds.refresh(Request())
+                except RefreshError as e:
+                    # Most commonly: the refresh token expired (7-day limit for
+                    # OAuth apps in "testing" mode) or was revoked.
+                    raise YouTubeAuthError(
+                        "YouTube refresh token expired or revoked. Re-authorize at "
+                        f"{CALLBACK_PATH.rsplit('/', 1)[0]} or run `sync-to-readwise "
+                        "setup youtube`."
+                    ) from e
                 self._save_credentials(creds)
             else:
-                raise RuntimeError("YouTube credentials invalid and not refreshable; rerun setup.")
+                raise YouTubeAuthError(
+                    "YouTube credentials invalid and not refreshable; re-authorize."
+                )
         return creds
 
     def _save_credentials(self, creds: Credentials) -> None:

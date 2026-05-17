@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import structlog
 
 from sync_to_readwise.core.config import SourceConfig
+from sync_to_readwise.core.item import Item
 from sync_to_readwise.core.readwise import ReadwiseClient
 from sync_to_readwise.core.source import Source
 
@@ -18,6 +19,9 @@ class SyncResult:
     created: int
     skipped: int
     errors: int
+    # Items actually pushed to Readwise this run. Carried so the daemon can
+    # record them in the activity feed. repr=False keeps log lines readable.
+    created_items: list[Item] = field(default_factory=list, repr=False)
 
 
 class Syncer:
@@ -38,6 +42,7 @@ class Syncer:
         tags = sorted({*source.default_tags, *source_cfg.tags})
 
         seen = created = skipped = errors = 0
+        created_items: list[Item] = []
         for item in source.fetch_candidates():
             seen += 1
             if self.readwise.exists(item.url):
@@ -46,6 +51,7 @@ class Syncer:
             try:
                 self.readwise.create_document(item, location=location, tags=tags)
                 created += 1
+                created_items.append(item)
                 log.info(
                     "item_created",
                     source=source.name,
@@ -57,7 +63,19 @@ class Syncer:
                 log.exception("item_create_failed", source=source.name, url=item.url, error=str(e))
 
         result = SyncResult(
-            source=source.name, seen=seen, created=created, skipped=skipped, errors=errors
+            source=source.name,
+            seen=seen,
+            created=created,
+            skipped=skipped,
+            errors=errors,
+            created_items=created_items,
         )
-        log.info("sync_completed", **result.__dict__)
+        log.info(
+            "sync_completed",
+            source=result.source,
+            seen=seen,
+            created=created,
+            skipped=skipped,
+            errors=errors,
+        )
         return result
