@@ -270,18 +270,22 @@ class TestWebOauth:
         assert web["redirect_uris"] == [redirect]
         assert web["token_uri"].startswith("https://oauth2.googleapis.com")
 
-    def test_authorization_url(self, tmp_path: Path) -> None:
+    def test_authorization_url_returns_pkce_verifier(self, tmp_path: Path) -> None:
         flow = MagicMock()
         flow.authorization_url.return_value = ("https://consent.example", "STATE9")
+        flow.code_verifier = "VERIFIER9"
 
         src = _src(tmp_path)
         with patch.object(youtube_mod, "Flow") as flow_cls:
             flow_cls.from_client_config.return_value = flow
-            url, oauth_state = src.web_authorization_url("http://h/auth/youtube/callback")
+            url, oauth_state, verifier = src.web_authorization_url("http://h/auth/youtube/callback")
 
         assert url == "https://consent.example"
         assert oauth_state == "STATE9"
+        # The PKCE verifier generated for the consent URL is returned to the caller.
+        assert verifier == "VERIFIER9"
         flow.authorization_url.assert_called_once_with(access_type="offline", prompt="consent")
+        assert flow_cls.from_client_config.call_args.kwargs["autogenerate_code_verifier"] is True
 
     def test_finish_web_authorization_saves_token(self, tmp_path: Path) -> None:
         creds = MagicMock()
@@ -292,9 +296,13 @@ class TestWebOauth:
         src = _src(tmp_path)
         with patch.object(youtube_mod, "Flow") as flow_cls:
             flow_cls.from_client_config.return_value = flow
-            src.finish_web_authorization("http://h/auth/youtube/callback", "STATE9", "CODE")
+            src.finish_web_authorization(
+                "http://h/auth/youtube/callback", "STATE9", "CODE", "VERIFIER9"
+            )
 
         flow.fetch_token.assert_called_once_with(code="CODE")
+        # The verifier from web_authorization_url is threaded into the token flow.
+        assert flow_cls.from_client_config.call_args.kwargs["code_verifier"] == "VERIFIER9"
         assert json.loads(src.token_path.read_text()) == {"refresh_token": "fresh"}
 
 
