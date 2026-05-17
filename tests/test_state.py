@@ -58,6 +58,15 @@ class TestLoad:
         path.write_text(json.dumps([1, 2, 3]))
         assert SyncState(path).snapshot()["sources"] == {}
 
+    def test_wrong_shape_keys_coerced(self, tmp_path: Path) -> None:
+        # Valid JSON, but `sources`/`recent_events` have drifted types — they
+        # must be coerced to safe defaults so later writes don't crash.
+        path = tmp_path / STATE_FILENAME
+        path.write_text(json.dumps({"sources": "garbage", "recent_events": 5}))
+        snap = SyncState(path).snapshot()
+        assert snap["sources"] == {}
+        assert snap["recent_events"] == []
+
 
 class TestMutations:
     def test_mark_daemon_started_persists(self, tmp_path: Path) -> None:

@@ -76,8 +76,16 @@ class SyncState:
             # start fresh; the next sync repopulates it.
             log.warning("sync_state_load_failed", path=str(self._path), error=str(e))
             return
-        if isinstance(loaded, dict):
-            self._data.update(loaded)
+        if not isinstance(loaded, dict):
+            return
+        # Coerce each key to the shape the mutation methods assume — valid JSON
+        # with a drifted shape (e.g. an older format) must not crash later
+        # setdefault/insert calls.
+        sources = loaded.get("sources")
+        events = loaded.get("recent_events")
+        self._data["daemon_started_at"] = loaded.get("daemon_started_at")
+        self._data["sources"] = sources if isinstance(sources, dict) else {}
+        self._data["recent_events"] = events if isinstance(events, list) else []
 
     def _flush(self) -> None:
         """Atomically write the whole state. Caller must hold the lock."""
