@@ -28,7 +28,7 @@ sync-to-readwise = "sync_to_readwise.cli:main"
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0",
+    "pytest>=9.1.1",
     "pytest-httpx>=0.30",
     "pytest-cov>=5.0",
     "ruff>=0.15.18",
