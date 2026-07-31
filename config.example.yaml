@@ -17,3 +17,11 @@ sources:
     interval_minutes: 60   # stars are infrequent; no need to poll often
     location: later
     tags: []
+
+  karakeep:
+    enabled: true
+    interval_minutes: 15
+    location: later
+    tags: []
+    no_sync_tags: [no-sync]  # unarchived links with any of these tags are excluded
+    import_tags: true        # copy eligible Karakeep tags into Reader

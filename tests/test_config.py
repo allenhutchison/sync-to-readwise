@@ -22,28 +22,34 @@ class TestSettings:
         assert s.data_dir == Path("/data")
         assert s.readwise_token.get_secret_value() == ""
         assert s.github_token.get_secret_value() == ""
+        assert s.karakeep_url == ""
+        assert s.karakeep_api_key.get_secret_value() == ""
 
     def test_env_overrides_unprefixed_secrets(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("READWISE_TOKEN", "rw-token")
         monkeypatch.setenv("GITHUB_TOKEN", "gh-token")
         monkeypatch.setenv("YOUTUBE_OAUTH_CLIENT_ID", "cid")
         monkeypatch.setenv("YOUTUBE_OAUTH_CLIENT_SECRET", "csecret")
+        monkeypatch.setenv("KARAKEEP_API_KEY", "kk")
 
         s = Settings()
         assert s.readwise_token.get_secret_value() == "rw-token"
         assert s.github_token.get_secret_value() == "gh-token"
         assert s.youtube_oauth_client_id.get_secret_value() == "cid"
         assert s.youtube_oauth_client_secret.get_secret_value() == "csecret"
+        assert s.karakeep_api_key.get_secret_value() == "kk"
 
     def test_env_prefixed_internal_vars(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("SYNCRW_LOG_LEVEL", "DEBUG")
         monkeypatch.setenv("SYNCRW_DATA_DIR", "~/syncrw-data")
+        monkeypatch.setenv("SYNCRW_KARAKEEP_URL", "http://karakeep:3000")
 
         s = Settings()
         assert s.log_level == "DEBUG"
         # Tilde expansion happens via the field validator.
         assert s.data_dir == Path.home() / "syncrw-data"
         assert s.data_dir.is_absolute()
+        assert s.karakeep_url == "http://karakeep:3000"
 
     def test_data_dir_validator_passes_through_path_objects(self) -> None:
         # Direct construction with a Path bypasses the str-only branch.

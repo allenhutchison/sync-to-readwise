@@ -60,6 +60,8 @@ class Settings(BaseSettings):
         default=SecretStr(""), validation_alias="YOUTUBE_OAUTH_CLIENT_SECRET"
     )
     github_token: SecretStr = Field(default=SecretStr(""), validation_alias="GITHUB_TOKEN")
+    karakeep_url: str = ""
+    karakeep_api_key: SecretStr = Field(default=SecretStr(""), validation_alias="KARAKEEP_API_KEY")
 
     @field_validator("data_dir", mode="before")
     @classmethod

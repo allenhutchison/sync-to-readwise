@@ -16,6 +16,8 @@ services:
       - YOUTUBE_OAUTH_CLIENT_ID
       - YOUTUBE_OAUTH_CLIENT_SECRET
       - GITHUB_TOKEN
+      - SYNCRW_KARAKEEP_URL
+      - KARAKEEP_API_KEY
     volumes:
       - ./data:/data
     # Publishes the status page (http://localhost:8088/). The same port is
