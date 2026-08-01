@@ -10,10 +10,11 @@ Built-in sources:
 ## Architecture
 
 ```
-┌──────────────┐     ┌────────────────┐     ┌────────────┐
-│  Source(s)   │ ──▶ │     Syncer     │ ──▶ │  Readwise  │
-│  (YouTube)   │     │  (dedup + push)│     │   Reader   │
-└──────────────┘     └────────────────┘     └────────────┘
+┌────────────────────┐     ┌────────────────┐     ┌────────────┐
+│     Source(s)      │ ──▶ │     Syncer     │ ──▶ │  Readwise  │
+│ youtube · github_  │     │  (dedup + push)│     │   Reader   │
+│ stars · karakeep   │     │                │     │            │
+└────────────────────┘     └────────────────┘     └────────────┘
 ```
 
 > Interactive deep dive: **[allenhutchison.github.io/sync-to-readwise](https://allenhutchison.github.io/sync-to-readwise/)** — a tabbed walkthrough of the architecture, modules, sync flow, and ops. Source lives at [`docs/index.html`](docs/index.html); GitHub Pages serves it from `main` / `/docs`.
