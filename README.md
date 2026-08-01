@@ -215,6 +215,16 @@ The syncer, scheduler, dedup, and CLI pick it up automatically.
 | `sources.<name>.location`          | string  | source default | `new`, `later`, `shortlist`, `archive`, `feed`. |
 | `sources.<name>.tags`              | list    | `[]`           | Added on top of source default tags.            |
 
+Per-source options (`karakeep`):
+
+| Key                                | Type    | Default        | Notes                                           |
+|------------------------------------|---------|----------------|-------------------------------------------------|
+| `sources.karakeep.no_sync_tags`    | list    | `[no-sync]`    | Unarchived links carrying any of these tags are skipped. Must be a list — a bare string is rejected at startup. |
+| `sources.karakeep.import_tags`     | bool    | `true`         | Copy the bookmark's other Karakeep tags into Reader. |
+
+Unknown keys under a source are rejected at startup rather than ignored, so a
+misspelled option can't look like it took effect.
+
 Environment (Doppler / `.env`):
 
 | Var                            | Required | Notes                                              |
