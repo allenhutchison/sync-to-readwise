@@ -7,7 +7,7 @@ from collections.abc import Callable
 from sync_to_readwise.core.config import AppConfig, SourceConfig
 from sync_to_readwise.core.source import Source
 from sync_to_readwise.sources.github_stars import GitHubStarsSource
-from sync_to_readwise.sources.karakeep import KarakeepSource
+from sync_to_readwise.sources.karakeep import KarakeepOptions, KarakeepSource
 from sync_to_readwise.sources.youtube import YouTubeLikesSource
 
 SourceFactory = Callable[[AppConfig, SourceConfig], Source]
@@ -26,12 +26,12 @@ def _build_github_stars(cfg: AppConfig, src_cfg: SourceConfig) -> Source:
 
 
 def _build_karakeep(cfg: AppConfig, src_cfg: SourceConfig) -> Source:
-    extra = src_cfg.model_extra or {}
+    options = KarakeepOptions.model_validate(src_cfg.model_extra or {})
     return KarakeepSource(
         base_url=cfg.settings.karakeep_url,
         api_key=cfg.settings.karakeep_api_key.get_secret_value(),
-        no_sync_tags=tuple(extra.get("no_sync_tags", ["no-sync"])),
-        import_tags=extra.get("import_tags", True),
+        no_sync_tags=options.no_sync_tags,
+        import_tags=options.import_tags,
     )
 
 

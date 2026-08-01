@@ -57,6 +57,39 @@ def test_build_karakeep_with_options(tmp_path: Path) -> None:
     assert src._import_tags is False
 
 
+def test_build_karakeep_defaults_when_options_omitted(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    cfg.yaml.sources["karakeep"] = SourceConfig.model_validate({"interval_minutes": 30})
+    src = build_source("karakeep", cfg)
+    assert src._no_sync_tags == {"no-sync"}
+    assert src._import_tags is True
+
+
+def test_build_karakeep_rejects_scalar_no_sync_tags(tmp_path: Path) -> None:
+    # A bare string would otherwise be iterated per-character into
+    # ("p", "r", "i", ...) and silently stop excluding the `private` tag.
+    cfg = _cfg(tmp_path)
+    cfg.yaml.sources["karakeep"] = SourceConfig.model_validate({"no_sync_tags": "private"})
+    with pytest.raises(ValueError, match="no_sync_tags"):
+        build_source("karakeep", cfg)
+
+
+def test_build_karakeep_coerces_quoted_boolean(tmp_path: Path) -> None:
+    # YAML `import_tags: "false"` is a truthy string; it must still mean False.
+    cfg = _cfg(tmp_path)
+    cfg.yaml.sources["karakeep"] = SourceConfig.model_validate({"import_tags": "false"})
+    src = build_source("karakeep", cfg)
+    assert src._import_tags is False
+
+
+def test_build_karakeep_rejects_unknown_option(tmp_path: Path) -> None:
+    # A misspelled key must fail loudly rather than look like it took effect.
+    cfg = _cfg(tmp_path)
+    cfg.yaml.sources["karakeep"] = SourceConfig.model_validate({"no_sync_tag": ["private"]})
+    with pytest.raises(ValueError, match="no_sync_tag"):
+        build_source("karakeep", cfg)
+
+
 def test_build_unknown_source_raises(tmp_path: Path) -> None:
     with pytest.raises(KeyError, match="Unknown source"):
         build_source("nope", _cfg(tmp_path))

@@ -5,11 +5,29 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 import httpx
+from pydantic import BaseModel, ConfigDict
 
 from sync_to_readwise.core.item import Item
 from sync_to_readwise.core.source import Source
 
 PAGE_SIZE = 100
+
+
+class KarakeepOptions(BaseModel):
+    """Typed view of this source's `sources.karakeep.*` block in config.yaml.
+
+    `SourceConfig` allows extra keys so a source can carry its own options, but
+    that leaves them unvalidated: `no_sync_tags: private` (a scalar instead of a
+    list) would become `("p", "r", "i", ...)` and silently stop excluding the
+    `private` tag. Validating here turns that into a startup error instead of a
+    bookmark leaking into Reader. `extra="forbid"` catches misspelled keys for
+    the same reason — a typo'd option must not look like it took effect.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    no_sync_tags: tuple[str, ...] = ("no-sync",)
+    import_tags: bool = True
 
 
 class KarakeepSource(Source):
