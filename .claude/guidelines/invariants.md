@@ -6,13 +6,18 @@ here was inferred from the code; nothing has been confirmed by a human yet.
 
 ## Confirmed by reading the code (verify these are actually the rules you want)
 
-### 1. A new source is one file plus a registry entry — nothing else
+### 1. A new source adds production code in exactly two places
 
 `Source` (`core/source.py`) is the only extension point. A new source subclasses it, sets
 `name` / `default_location` / `default_tags`, implements `fetch_candidates()`, and gets a
-`_build_<name>` factory added to `REGISTRY` in `registry.py`. A source must **not** reach into the
-syncer, the scheduler, or the CLI. If a diff adds source-specific branching outside
-`sources/` + `registry.py`, that's a violation.
+`_build_<name>` factory added to `REGISTRY` in `registry.py`. A source's production code must
+**not** reach into the syncer, the scheduler, or the CLI. If a diff adds source-specific
+branching outside `sources/` + `registry.py`, that's a violation.
+
+**Scope: production code only.** A source PR is *expected* to also touch its own
+`tests/test_<name>.py` (required by `testing.md`), new `Settings` fields in `core/config.py`,
+README, `config.example.yaml`, and the compose files. None of those are violations — don't flag
+them. What this rule forbids is source-specific logic leaking into the shared sync path.
 
 ### 2. Registry factories are the only place secrets are unwrapped
 
