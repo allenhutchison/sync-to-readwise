@@ -54,13 +54,28 @@ doppler setup --project sync-to-readwise --config dev
 
 > The local `doppler.yaml` that `doppler setup` writes is per-developer state and is gitignored. Each contributor runs `doppler setup` once after cloning.
 
-Set the three secrets above:
+Set the secrets for the sources you plan to enable. `READWISE_TOKEN` is the only
+one every deployment needs:
 
 ```bash
 doppler secrets set READWISE_TOKEN=...
+
+# youtube
 doppler secrets set YOUTUBE_OAUTH_CLIENT_ID=...
 doppler secrets set YOUTUBE_OAUTH_CLIENT_SECRET=...
+
+# github_stars
+doppler secrets set GITHUB_TOKEN=...
+
+# karakeep
+doppler secrets set KARAKEEP_API_KEY=...
+doppler secrets set SYNCRW_KARAKEEP_URL=http://karakeep:3000
 ```
+
+`config.example.yaml` enables every source. A source whose credentials are
+missing is logged and skipped at startup rather than failing the daemon, so you
+can leave one configured-but-unset — or set `enabled: false` for it in
+`data/config.yaml` to keep the startup logs quiet.
 
 Get a YouTube OAuth client first if you don't have one:
 - [Google Cloud Console](https://console.cloud.google.com/) → create or select a project.
