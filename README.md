@@ -5,14 +5,16 @@ Pluggable syncer that pushes content from third-party sources into [Readwise Rea
 Built-in sources:
 - **YouTube liked videos** — when you like a video on YouTube, it shows up in Reader for triage.
 - **GitHub starred repositories** — when you star a repo, the README ends up in Reader.
+- **Karakeep bookmarks** — unarchived link bookmarks show up in Reader unless tagged `no-sync`.
 
 ## Architecture
 
 ```
-┌──────────────┐     ┌────────────────┐     ┌────────────┐
-│  Source(s)   │ ──▶ │     Syncer     │ ──▶ │  Readwise  │
-│  (YouTube)   │     │  (dedup + push)│     │   Reader   │
-└──────────────┘     └────────────────┘     └────────────┘
+┌────────────────────┐     ┌────────────────┐     ┌────────────┐
+│     Source(s)      │ ──▶ │     Syncer     │ ──▶ │  Readwise  │
+│ youtube · github_  │     │  (dedup + push)│     │   Reader   │
+│ stars · karakeep   │     │                │     │            │
+└────────────────────┘     └────────────────┘     └────────────┘
 ```
 
 > Interactive deep dive: **[allenhutchison.github.io/sync-to-readwise](https://allenhutchison.github.io/sync-to-readwise/)** — a tabbed walkthrough of the architecture, modules, sync flow, and ops. Source lives at [`docs/index.html`](docs/index.html); GitHub Pages serves it from `main` / `/docs`.
@@ -32,6 +34,11 @@ These live in Doppler (project: `sync-to-readwise`). `READWISE_TOKEN` is require
 | `YOUTUBE_OAUTH_CLIENT_ID`      | `youtube`       | Google Cloud Console → Credentials → OAuth 2.0 Client (Desktop)  |
 | `YOUTUBE_OAUTH_CLIENT_SECRET`  | `youtube`       | Same OAuth client                                                |
 | `GITHUB_TOKEN`                 | `github_stars`  | GitHub → Settings → Developer settings → Personal access tokens. Default scope is fine for public stars; add `repo` if you star private repos. |
+| `KARAKEEP_API_KEY`             | `karakeep`      | Karakeep → Settings → API Keys. A bookmarks read-only key is sufficient. |
+
+Set `SYNCRW_KARAKEEP_URL` to the address reachable from this container, such
+as `http://karakeep:3000` when both services share a Docker network. Do not
+use `localhost` unless Karakeep runs in the same container.
 
 Non-secret config (intervals, locations, tags) lives in `data/config.yaml` so it's reviewable in git.
 
@@ -47,13 +54,28 @@ doppler setup --project sync-to-readwise --config dev
 
 > The local `doppler.yaml` that `doppler setup` writes is per-developer state and is gitignored. Each contributor runs `doppler setup` once after cloning.
 
-Set the three secrets above:
+Set the secrets for the sources you plan to enable. `READWISE_TOKEN` is the only
+one every deployment needs:
 
 ```bash
 doppler secrets set READWISE_TOKEN=...
+
+# youtube
 doppler secrets set YOUTUBE_OAUTH_CLIENT_ID=...
 doppler secrets set YOUTUBE_OAUTH_CLIENT_SECRET=...
+
+# github_stars
+doppler secrets set GITHUB_TOKEN=...
+
+# karakeep
+doppler secrets set KARAKEEP_API_KEY=...
+doppler secrets set SYNCRW_KARAKEEP_URL=http://karakeep:3000
 ```
+
+`config.example.yaml` enables every source. A source whose credentials are
+missing is logged and skipped at startup rather than failing the daemon, so you
+can leave one configured-but-unset — or set `enabled: false` for it in
+`data/config.yaml` to keep the startup logs quiet.
 
 Get a YouTube OAuth client first if you don't have one:
 - [Google Cloud Console](https://console.cloud.google.com/) → create or select a project.
@@ -102,6 +124,19 @@ docker compose logs -f
 ```
 
 The first run **backfills all** of your liked videos into Readwise (location: `later`, tag: `youtube`). Subsequent runs poll every 15 minutes for new likes.
+
+Karakeep similarly backfills all unarchived link bookmarks. Add the `no-sync`
+tag in Karakeep to exclude a bookmark. Other Karakeep tags are copied into
+Reader by default; both behaviors are configurable:
+
+```yaml
+sources:
+  karakeep:
+    interval_minutes: 15
+    location: later
+    no_sync_tags: [no-sync]
+    import_tags: true
+```
 
 ### Production / homelab
 
@@ -179,6 +214,16 @@ The syncer, scheduler, dedup, and CLI pick it up automatically.
 | `sources.<name>.location`          | string  | source default | `new`, `later`, `shortlist`, `archive`, `feed`. |
 | `sources.<name>.tags`              | list    | `[]`           | Added on top of source default tags.            |
 
+Per-source options (`karakeep`):
+
+| Key                                | Type    | Default        | Notes                                           |
+|------------------------------------|---------|----------------|-------------------------------------------------|
+| `sources.karakeep.no_sync_tags`    | list    | `[no-sync]`    | Unarchived links carrying any of these tags are skipped. Must be a list — a bare string is rejected at startup. |
+| `sources.karakeep.import_tags`     | bool    | `true`         | Copy the bookmark's other Karakeep tags into Reader. |
+
+Unknown keys in the Karakeep options block are rejected at startup rather than
+ignored, so a misspelled option can't look like it took effect.
+
 Environment (Doppler / `.env`):
 
 | Var                            | Required | Notes                                              |
@@ -186,6 +231,8 @@ Environment (Doppler / `.env`):
 | `READWISE_TOKEN`               | yes      | https://readwise.io/access_token                   |
 | `YOUTUBE_OAUTH_CLIENT_ID`      | yes      | Used by the YouTube source.                        |
 | `YOUTUBE_OAUTH_CLIENT_SECRET`  | yes      | "                                                  |
+| `KARAKEEP_API_KEY`             | karakeep | Karakeep API key with bookmark read access.         |
+| `SYNCRW_KARAKEEP_URL`          | karakeep | Base server URL reachable from the sync container.  |
 | `SYNCRW_LOG_LEVEL`             | no       | Default `INFO`.                                    |
 | `SYNCRW_DATA_DIR`              | no       | Default `/data`.                                   |
 | `SYNCRW_WEB_ENABLED`           | no       | Default `true`. Serve the status page.             |

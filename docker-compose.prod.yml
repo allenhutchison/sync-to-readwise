@@ -3,7 +3,7 @@
 # In prod the only host-side secret is DOPPLER_TOKEN — a Doppler service token
 # scoped to ``sync-to-readwise/prod``. The container's entrypoint runs the actual
 # command under ``doppler run --``, which fetches every other secret
-# (READWISE_TOKEN, YOUTUBE_OAUTH_CLIENT_ID, YOUTUBE_OAUTH_CLIENT_SECRET) at
+# (READWISE_TOKEN, source credentials, and source URLs) at
 # start time and injects them as environment variables.
 #
 # Bring up:

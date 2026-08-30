@@ -39,7 +39,7 @@ class Syncer:
         self.readwise.warm_cache(category=warm_category)
 
         location = source_cfg.location or source.default_location
-        tags = sorted({*source.default_tags, *source_cfg.tags})
+        source_tags = {*source.default_tags, *source_cfg.tags}
 
         seen = created = skipped = errors = 0
         created_items: list[Item] = []
@@ -49,6 +49,7 @@ class Syncer:
                 skipped += 1
                 continue
             try:
+                tags = sorted({*source_tags, *item.tags})
                 self.readwise.create_document(item, location=location, tags=tags)
                 created += 1
                 created_items.append(item)

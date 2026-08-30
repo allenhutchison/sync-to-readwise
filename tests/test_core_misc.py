@@ -133,6 +133,17 @@ class TestSyncer:
         _, kwargs = rw.create_document.call_args
         assert kwargs["tags"] == ["custom", "default-tag"]  # sorted, deduped
 
+    def test_tags_include_per_item_tags(self) -> None:
+        item = Item(
+            url="https://a.example/1",
+            source_name="fake",
+            tags=("karakeep-tag", "default-tag"),
+        )
+        rw = _stub_readwise()
+        Syncer(rw).sync(_FakeSource(items=[item]), SourceConfig(tags=["custom"]))
+        _, kwargs = rw.create_document.call_args
+        assert kwargs["tags"] == ["custom", "default-tag", "karakeep-tag"]
+
     def test_create_exception_counts_as_error_not_fatal(self) -> None:
         items = [
             Item(url="https://a.example/1", source_name="fake"),
