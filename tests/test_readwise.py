@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 import pytest
@@ -16,6 +17,7 @@ from sync_to_readwise.core.readwise import (
     ReadwiseError,
     _parse_retry_after,
 )
+from sync_to_readwise.core.urlstore import Document, UrlStore
 
 
 @pytest.fixture
@@ -53,6 +55,13 @@ def fake_clock(monkeypatch: pytest.MonkeyPatch) -> _Clock:
     monkeypatch.setattr(readwise_mod.time, "monotonic", clock)
     monkeypatch.setattr(readwise_mod.time, "sleep", _sleep)
     return clock
+
+
+@pytest.fixture
+def store() -> UrlStore:
+    s = UrlStore()
+    yield s
+    s.close()
 
 
 @pytest.fixture
@@ -116,41 +125,93 @@ class TestWarmCache:
         assert client.exists("https://a.example/3")
         assert not client.exists("https://a.example/missing")
 
-    def test_scoped_to_category(
+    def test_full_walk_when_store_has_no_cursor(
         self, httpx_mock, client: ReadwiseClient, no_sleep: list[float]
     ) -> None:
+        # No cursor yet, so no updatedAfter filter: the first walk is a full one.
         httpx_mock.add_response(
-            url="https://readwise.io/api/v3/list/?category=video",
-            json={"results": [{"source_url": "https://yt.example/v"}], "nextPageCursor": None},
+            url="https://readwise.io/api/v3/list/",
+            json={
+                "results": [
+                    {"source_url": "https://a.example/1", "updated_at": "2026-01-01T00:00:00+00:00"}
+                ],
+                "nextPageCursor": None,
+            },
         )
-        client.warm_cache(category="video")
-        assert client.exists("https://yt.example/v")
+        client.warm_cache()
+        assert client.exists("https://a.example/1")
+        # The completed walk leaves a cursor behind for next time.
+        assert client._store.cursor is not None
 
-    def test_idempotent_per_category(
-        self, httpx_mock, client: ReadwiseClient, no_sleep: list[float]
+    def test_second_process_walks_incrementally(
+        self, httpx_mock, store: UrlStore, no_sleep: list[float]
     ) -> None:
-        httpx_mock.add_response(
-            url="https://readwise.io/api/v3/list/?category=video",
-            json={"results": [], "nextPageCursor": None},
+        """A restart against a warm store asks only for what changed."""
+        store.add_many(
+            [Document(url="https://a.example/1", updated_at="2026-01-01T00:00:00+00:00")]
         )
-        client.warm_cache(category="video")
-        # Second call with same category must not issue another HTTP request —
-        # if it did, pytest-httpx would error on a missing matcher.
-        client.warm_cache(category="video")
+        store.set_cursor("2026-01-01T00:00:00+00:00")
+        cursor = store.cursor
+        assert cursor is not None
 
-    def test_distinct_categories_warm_separately(
+        # pytest-httpx matches on the full URL, so this asserts the filter is sent.
+        httpx_mock.add_response(
+            url=f"https://readwise.io/api/v3/list/?updatedAfter={quote(cursor, safe='')}",
+            json={
+                "results": [
+                    {"source_url": "https://a.example/2", "updated_at": "2026-02-01T00:00:00+00:00"}
+                ],
+                "nextPageCursor": None,
+            },
+        )
+        with ReadwiseClient("token", store=store) as rw:
+            rw.warm_cache()
+            # Known from disk without any request having covered it.
+            assert rw.exists("https://a.example/1")
+            assert rw.exists("https://a.example/2")
+
+    def test_idempotent_within_a_process(
         self, httpx_mock, client: ReadwiseClient, no_sleep: list[float]
     ) -> None:
         httpx_mock.add_response(
-            url="https://readwise.io/api/v3/list/?category=video",
+            url="https://readwise.io/api/v3/list/",
             json={"results": [], "nextPageCursor": None},
         )
+        client.warm_cache()
+        # A second call must not issue another request — pytest-httpx would
+        # error on a missing matcher if it did.
+        client.warm_cache()
+
+    def test_cursor_not_advanced_when_walk_fails(
+        self, httpx_mock, client: ReadwiseClient, no_sleep: list[float]
+    ) -> None:
+        """A walk that dies mid-pagination must leave the cursor untouched.
+
+        Advancing it would move the window past documents that were never
+        ingested, hiding them from every future pass.
+        """
         httpx_mock.add_response(
-            url="https://readwise.io/api/v3/list/?category=article",
-            json={"results": [], "nextPageCursor": None},
+            url="https://readwise.io/api/v3/list/",
+            json={
+                "results": [
+                    {"source_url": "https://a.example/1", "updated_at": "2026-01-01T00:00:00+00:00"}
+                ],
+                "nextPageCursor": "page2",
+            },
         )
-        client.warm_cache(category="video")
-        client.warm_cache(category="article")
+        for _ in range(MAX_ATTEMPTS):
+            httpx_mock.add_response(
+                url="https://readwise.io/api/v3/list/?pageCursor=page2",
+                status_code=429,
+                headers={"Retry-After": "1"},
+            )
+
+        with pytest.raises(httpx.HTTPStatusError):
+            client.warm_cache()
+
+        assert client._store.cursor is None
+        # The page that did land is still persisted; only the cursor is withheld.
+        assert client.exists("https://a.example/1")
 
 
 class TestCreateDocument:
@@ -440,7 +501,7 @@ class TestRequestEdgeCases:
         # Use the public surface to exercise _request.
         client.warm_cache()
         # A no-content list still completes the warm_cache loop.
-        assert "*" in client._cache_warmed_for
+        assert client._warmed
 
 
 def test_readwise_error_is_exception() -> None:

@@ -30,7 +30,6 @@ class GitHubStarsSource(Source):
     # Readwise categorizes ordinary web pages (including GitHub repo pages) as
     # `article`. Scoping the dedup cache to that category avoids paginating
     # through every video / book / pdf the user has saved.
-    readwise_category = "article"
 
     def __init__(self, *, token: str) -> None:
         if not token:

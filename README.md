@@ -20,7 +20,7 @@ Built-in sources:
 > Interactive deep dive: **[allenhutchison.github.io/sync-to-readwise](https://allenhutchison.github.io/sync-to-readwise/)** — a tabbed walkthrough of the architecture, modules, sync flow, and ops. Source lives at [`docs/index.html`](docs/index.html); GitHub Pages serves it from `main` / `/docs`.
 
 - `Source` is an interface — adding a new source (Reddit saved, GitHub stars, etc.) is one file plus a registry entry.
-- The syncer queries Readwise to dedup; no local "what's been synced" state file.
+- The syncer dedups against a persistent record of what already exists in Reader (`<data_dir>/readwise_urls.db`), refreshed incrementally on each start.
 - Runs as a long-lived Docker container with an internal scheduler.
 - **Secrets live in [Doppler](https://www.doppler.com/)**: the Doppler CLI is installed in the image and the entrypoint wraps the command with `doppler run --` when `DOPPLER_TOKEN` is set, mirroring how [`pepper`](../pepper) does it.
 
@@ -201,7 +201,7 @@ matches exactly what's registered; if unset, it's derived from the request's
 3. Register a factory in `src/sync_to_readwise/registry.py`.
 4. Optionally add a section under `sources:` in `data/config.yaml`.
 
-The syncer, scheduler, dedup, and CLI pick it up automatically.
+The syncer, scheduler, dedup, and CLI pick it up automatically. Sources need no dedup logic of their own — the shared URL store covers every source.
 
 ## Configuration reference
 
@@ -256,6 +256,8 @@ To enable publishing, set these repository secrets in GitHub Settings → Secret
 
 ## Notes
 
-- Dedup queries Readwise (`category=video` for the YouTube source) on each sync to build an in-memory URL set, then `Source.fetch_candidates()` is checked against it. No local state file.
+- Dedup is a property of the destination, not of any one source: a single URL store in `<data_dir>/readwise_urls.db` is shared by every source, so a link saved by one won't be duplicated by another.
+- The store is refreshed from `/list/` at startup using `updatedAfter`, so a restart re-reads only what changed rather than walking the whole library. A first run — or a deleted database — falls back to one full walk, which at Readwise's 20 req/min list limit takes roughly a minute per 2,000 documents.
+- Deletions are never inferred. If you remove something from Reader and want it synced again, run `sync-to-readwise forget <url>`; nothing prunes the store automatically, because a walk truncated by a rate limit would otherwise look like a mass deletion and re-save the library.
 - We never re-`save` an existing URL, so triaging a video in Reader (moving it out of `later`, retagging) won't be undone by a later sync.
 - Private and deleted videos in your liked list are skipped silently.

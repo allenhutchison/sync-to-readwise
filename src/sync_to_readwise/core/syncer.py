@@ -33,10 +33,10 @@ class Syncer:
     def sync(self, source: Source, source_cfg: SourceConfig) -> SyncResult:
         log.info("sync_started", source=source.name)
 
-        # Warm the URL cache once (scoped to category=video for the YouTube case)
-        # Sources that aren't videos can opt out by overriding warm_cache_category.
-        warm_category = getattr(source, "readwise_category", None)
-        self.readwise.warm_cache(category=warm_category)
+        # Brings the persistent URL store up to date. Incremental after the
+        # first run, and shared by every source — dedup is a property of the
+        # destination, not of who is syncing into it.
+        self.readwise.warm_cache()
 
         location = source_cfg.location or source.default_location
         source_tags = {*source.default_tags, *source_cfg.tags}

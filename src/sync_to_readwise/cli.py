@@ -14,6 +14,7 @@ from sync_to_readwise.core.logging import configure_logging
 from sync_to_readwise.core.readwise import ReadwiseClient
 from sync_to_readwise.core.state import STATE_FILENAME, SyncState
 from sync_to_readwise.core.syncer import Syncer
+from sync_to_readwise.core.urlstore import STORE_FILENAME, UrlStore
 from sync_to_readwise.registry import REGISTRY, build_source
 from sync_to_readwise.sources.youtube import YouTubeAuthError, YouTubeLikesSource
 from sync_to_readwise.web.app import StatusApp
@@ -90,9 +91,13 @@ def sync_once(ctx: click.Context, source_name: str) -> None:
     source = build_source(source_name, cfg)
     src_cfg = cfg.source_config(source_name)
 
-    with ReadwiseClient(cfg.settings.readwise_token.get_secret_value()) as rw:
-        syncer = Syncer(rw)
-        result = syncer.sync(source, src_cfg)
+    store = UrlStore(cfg.data_dir / STORE_FILENAME)
+    try:
+        with ReadwiseClient(cfg.settings.readwise_token.get_secret_value(), store=store) as rw:
+            syncer = Syncer(rw)
+            result = syncer.sync(source, src_cfg)
+    finally:
+        store.close()
 
     click.echo(
         f"{result.source}: seen={result.seen} created={result.created} "
@@ -133,6 +138,27 @@ def start_web_server(cfg: AppConfig, state: SyncState) -> object | None:
     return serve_in_thread(app, cfg.settings.web_host, cfg.settings.web_port)
 
 
+@main.command("forget")
+@click.argument("url")
+@click.pass_context
+def forget(ctx: click.Context, url: str) -> None:
+    """Drop URL from the dedup store so the next sync re-saves it.
+
+    Deletions are never inferred: a reconciler that pruned everything it failed
+    to observe in a listing would, on a walk truncated by a rate limit or a
+    transport error, decide the whole library was gone and re-save all of it.
+    Removing something from Reader and wanting it back is rare enough to be
+    worth one explicit command.
+    """
+    cfg = _load(ctx.obj["config_path"])
+    store = UrlStore(cfg.data_dir / STORE_FILENAME)
+    try:
+        existed = store.forget(url)
+    finally:
+        store.close()
+    click.echo(f"{'forgot' if existed else 'not in store'}: {url}")
+
+
 @main.command("run")
 @click.pass_context
 def run_daemon(ctx: click.Context) -> None:
@@ -170,7 +196,8 @@ def run_daemon(ctx: click.Context) -> None:
         log.warning("no_sources_runnable", registered=sorted(REGISTRY))
         return
 
-    rw = ReadwiseClient(cfg.settings.readwise_token.get_secret_value())
+    store = UrlStore(cfg.data_dir / STORE_FILENAME)
+    rw = ReadwiseClient(cfg.settings.readwise_token.get_secret_value(), store=store)
     syncer = Syncer(rw)
     scheduler = BlockingScheduler()
 
@@ -205,12 +232,19 @@ def run_daemon(ctx: click.Context) -> None:
         log.info("shutdown_requested")
         scheduler.shutdown(wait=False)
         rw.close()
+        store.close()
 
     signal.signal(signal.SIGTERM, _shutdown)
     signal.signal(signal.SIGINT, _shutdown)
 
     log.info("daemon_started", sources=list(enabled))
-    scheduler.start()
+    try:
+        scheduler.start()
+    finally:
+        # _shutdown covers the signal paths; this covers every other exit —
+        # scheduler.start() raising, or returning after a shutdown call.
+        rw.close()
+        store.close()
 
 
 if __name__ == "__main__":

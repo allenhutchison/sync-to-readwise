@@ -75,22 +75,12 @@ def _stub_readwise(*, known: set[str] | None = None, raise_on: set[str] | None =
 
 
 class TestSyncer:
-    def test_warm_cache_called_with_source_category(self) -> None:
+    def test_warms_cache_once_per_sync(self) -> None:
         src = _FakeSource(items=[])
         rw = _stub_readwise()
         Syncer(rw).sync(src, SourceConfig())
-        rw.warm_cache.assert_called_once_with(category="article")
-
-    def test_warm_cache_none_when_source_lacks_category(self) -> None:
-        class _NoCat(Source):
-            name = "nc"
-
-            def fetch_candidates(self) -> Iterable[Item]:
-                return iter([])
-
-        rw = _stub_readwise()
-        Syncer(rw).sync(_NoCat(), SourceConfig())
-        rw.warm_cache.assert_called_once_with(category=None)
+        # One shared, unscoped store now — no per-source category argument.
+        rw.warm_cache.assert_called_once_with()
 
     def test_creates_new_skips_known(self) -> None:
         items = [
