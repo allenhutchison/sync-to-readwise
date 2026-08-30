@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any
 
@@ -12,9 +13,20 @@ log = structlog.get_logger(__name__)
 
 READER_API = "https://readwise.io/api/v3"
 
-# Readwise documents 20 req/min on the /save/ endpoint. Pace at one every ~3.5s
-# to stay comfortably under that. /list/ has a more generous limit, so we only
-# throttle saves.
+# Readwise's documented per-token rate limits (https://readwise.io/reader_api):
+# 20 req/min on /list/, 50 req/min on /save/.
+#
+# These were previously transposed here: /save/ was paced as though it were the
+# 20/min endpoint, and /list/ was left unthrottled entirely as "the more
+# generous one". A cold cache warm therefore paginated flat out against the
+# *stricter* of the two, and since the daemon warms every source at startup it
+# spent most of that time in 429 backoff (Readwise returns a ~47-58s
+# Retry-After under sustained pressure).
+#
+# 20/min is one request every 3.0s; 3.2s leaves headroom for jitter.
+LIST_MIN_INTERVAL_S = 3.2
+# 50/min would allow 1.2s, but /save/ mutates the user's library and a backfill
+# is not latency-sensitive, so we stay deliberately well under the ceiling.
 SAVE_MIN_INTERVAL_S = 3.5
 
 DEFAULT_RETRY_AFTER_S = 10.0
@@ -40,7 +52,14 @@ class ReadwiseClient:
         )
         self._known_urls: set[str] = set()
         self._cache_warmed_for: set[str] = set()
-        self._last_save_at: float = 0.0
+        # Rate limits are per access token, and `run_daemon` shares one client
+        # across per-source scheduler threads that all fire at startup. Pacing
+        # therefore has to be serialized globally: an unsynchronized check lets
+        # N threads each independently conclude that enough time has passed and
+        # issue their requests simultaneously, which is N times the intended
+        # rate no matter what the interval is set to.
+        self._throttle_lock = threading.Lock()
+        self._last_request_at: dict[str, float] = {}
 
     def close(self) -> None:
         self._client.close()
@@ -107,18 +126,32 @@ class ReadwiseClient:
         if tags:
             payload["tags"] = tags
 
-        self._throttle_save()
         resp = self._request("POST", "/save/", json=payload)
-        self._last_save_at = time.monotonic()
         self._known_urls.add(item.url)
         return resp
 
     # ---------- internals ----------
 
-    def _throttle_save(self) -> None:
-        elapsed = time.monotonic() - self._last_save_at
-        if elapsed < SAVE_MIN_INTERVAL_S:
-            time.sleep(SAVE_MIN_INTERVAL_S - elapsed)
+    def _throttle(self, path: str) -> None:
+        """Pace requests against the rate limit for `path`'s endpoint.
+
+        Called once per attempt inside `_request`, not at the call site, so
+        paginated walks and post-429 retries are paced too — not just the first
+        request of a sequence. The lock is held across the sleep so concurrent
+        callers queue behind one another rather than all waking together.
+        """
+        if path.startswith("/save"):
+            key, min_interval = "save", SAVE_MIN_INTERVAL_S
+        else:
+            key, min_interval = "list", LIST_MIN_INTERVAL_S
+
+        with self._throttle_lock:
+            last = self._last_request_at.get(key)
+            if last is not None:
+                elapsed = time.monotonic() - last
+                if elapsed < min_interval:
+                    time.sleep(min_interval - elapsed)
+            self._last_request_at[key] = time.monotonic()
 
     def _request(
         self,
@@ -135,6 +168,7 @@ class ReadwiseClient:
         """
         backoff = 2.0
         for attempt in range(1, MAX_ATTEMPTS + 1):
+            self._throttle(path)
             try:
                 r = self._client.request(method, path, params=params, json=json)
             except httpx.TransportError as e:
