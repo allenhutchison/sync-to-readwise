@@ -101,6 +101,16 @@ class UrlStore:
         # check_same_thread=False because the daemon's per-source scheduler
         # threads share one store; every access is serialized by self._lock.
         self._conn = sqlite3.connect(target, check_same_thread=False)
+        if path is not None:
+            # The daemon holds this file open for its whole life while
+            # `sync-once` and `forget` open it from separate processes. Under
+            # the default rollback journal a writer takes an exclusive lock on
+            # the file, so those would fail with "database is locked"; WAL lets
+            # a reader and a writer coexist, and the busy timeout absorbs the
+            # brief writer-writer overlaps that remain. Not applied to
+            # in-memory stores, which have no second process to contend with.
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA busy_timeout=5000")
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
         self._lock = threading.Lock()
@@ -163,6 +173,13 @@ class UrlStore:
         removes entries it did not observe in a listing would, on a truncated
         walk, conclude the whole library is gone and re-save all of it. Deletion
         is rare and better driven by an explicit human action.
+
+        Only affects this store instance. A daemon already running holds its own
+        `_keys` set, loaded at startup, and will keep reporting the URL as known
+        until it restarts — so a `forget` from the CLI reaches the daemon on its
+        next restart, not immediately. Re-reading the whole set per sync to close
+        that gap would cost a full table scan every interval, on every source,
+        to serve an operation that happens by hand and rarely.
         """
         key = url_key(url)
         with self._lock:

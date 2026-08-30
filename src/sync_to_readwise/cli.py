@@ -156,7 +156,11 @@ def forget(ctx: click.Context, url: str) -> None:
         existed = store.forget(url)
     finally:
         store.close()
-    click.echo(f"{'forgot' if existed else 'not in store'}: {url}")
+    if existed:
+        click.echo(f"forgot: {url}")
+        click.echo("A running daemon keeps its own copy until it restarts.")
+    else:
+        click.echo(f"not in store: {url}")
 
 
 @main.command("run")

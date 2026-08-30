@@ -322,6 +322,9 @@ class TestForget:
         )
         assert result.exit_code == 0, result.output
         assert "forgot" in result.output
+        # A running daemon holds its own set, so the CLI must not imply the
+        # removal took effect everywhere.
+        assert "restart" in result.output.lower()
 
         reopened = UrlStore(env / STORE_FILENAME)
         assert not reopened.contains("https://a.example/1")

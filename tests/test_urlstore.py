@@ -56,9 +56,39 @@ class TestPersistence:
         second.close()
 
     def test_creates_parent_directory(self, tmp_path: Path) -> None:
-        store = UrlStore(tmp_path / "nested" / "dir" / STORE_FILENAME)
+        path = tmp_path / "nested" / "dir" / STORE_FILENAME
+        store = UrlStore(path)
         store.add(Document(url="https://a.example/1"))
         store.close()
+        assert path.exists()
+
+    def test_file_backed_store_uses_wal(self, tmp_path: Path) -> None:
+        # Without WAL a writing process takes an exclusive lock on the file, and
+        # `sync-once` or `forget` running beside the daemon fail with
+        # "database is locked".
+        store = UrlStore(tmp_path / STORE_FILENAME)
+        mode = store._conn.execute("PRAGMA journal_mode").fetchone()[0]
+        assert mode.lower() == "wal"
+        store.close()
+
+    def test_two_processes_can_write_the_same_file(self, tmp_path: Path) -> None:
+        """The daemon keeps its store open; `forget` and `sync-once` open the same file."""
+        path = tmp_path / STORE_FILENAME
+        daemon = UrlStore(path)
+        daemon.add(Document(url="https://a.example/1"))
+
+        beside = UrlStore(path)
+        beside.add(Document(url="https://a.example/2"))
+        assert beside.forget("https://a.example/1") is True
+        beside.close()
+
+        daemon.add(Document(url="https://a.example/3"))
+        daemon.close()
+
+        final = UrlStore(path)
+        assert final.contains("https://a.example/2")
+        assert final.contains("https://a.example/3")
+        final.close()
 
     def test_upsert_keeps_known_id_when_later_row_lacks_one(self, tmp_path: Path) -> None:
         # create_document knows the id; a later listing row might not carry one.
