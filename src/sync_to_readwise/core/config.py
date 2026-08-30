@@ -12,13 +12,25 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_args
 
 import yaml
 from pydantic import BaseModel, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Every location Reader has.
 ReaderLocation = Literal["new", "later", "shortlist", "archive", "feed"]
+
+# Where a source is allowed to save. `feed` is excluded deliberately: it holds
+# RSS items that arrive on their own, and the dedup cache is built by walking
+# exactly these locations (see SYNC_LOCATIONS in core/readwise.py, which derives
+# from this type). A document saved into `feed` would therefore never be seen by
+# a later warm, so after any cache rebuild the syncer would save it again and
+# report it as newly created. Keeping the destination set and the walked set the
+# same type makes that class of drift impossible.
+SyncDestination = Literal["new", "later", "shortlist", "archive"]
+
+SAVED_LOCATIONS: tuple[str, ...] = get_args(SyncDestination)
 
 
 class Settings(BaseSettings):
@@ -76,7 +88,7 @@ class SourceConfig(BaseModel):
 
     enabled: bool = True
     interval_minutes: int = Field(default=15, ge=1)
-    location: ReaderLocation | None = None  # None = use source default
+    location: SyncDestination | None = None  # None = use source default
     tags: list[str] = Field(default_factory=list)  # added on top of source default tags
 
     model_config = {"extra": "allow"}

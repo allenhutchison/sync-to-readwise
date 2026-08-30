@@ -7,6 +7,7 @@ from typing import Any
 import httpx
 import structlog
 
+from sync_to_readwise.core.config import SAVED_LOCATIONS
 from sync_to_readwise.core.item import Item
 from sync_to_readwise.core.urlstore import Document, UrlStore
 
@@ -42,10 +43,11 @@ SAVE_MIN_INTERVAL_S = 3.5
 # source. A false "already have it" drops a document with no error, which is the
 # expensive direction to be wrong in.
 #
-# `/list/` has no "exclude location" filter, so this walks the four saved
-# locations by name. Readwise's set is fixed (new/later/shortlist/archive/feed),
-# so this enumerates rather than discovers.
-SYNC_LOCATIONS = ("new", "later", "shortlist", "archive")
+# `/list/` has no "exclude location" filter, so this walks the saved locations by
+# name. Derived from `SyncDestination` rather than restated, so the set a source
+# may save into and the set the cache is built from cannot drift apart — if they
+# did, documents saved to the missing location would be invisible to every warm.
+SYNC_LOCATIONS = SAVED_LOCATIONS
 
 DEFAULT_RETRY_AFTER_S = 10.0
 MAX_ATTEMPTS = 8

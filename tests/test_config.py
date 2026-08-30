@@ -4,15 +4,18 @@ from pathlib import Path
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from sync_to_readwise.core import config as config_mod
 from sync_to_readwise.core.config import (
+    SAVED_LOCATIONS,
     AppConfig,
     Settings,
     SourceConfig,
     YamlConfig,
     load,
 )
+from sync_to_readwise.core.readwise import SYNC_LOCATIONS
 
 
 class TestSettings:
@@ -155,3 +158,24 @@ class TestLoad:
 def test_module_constants() -> None:
     # Spot-check the public ReaderLocation alias is importable.
     assert "later" in config_mod.ReaderLocation.__args__  # type: ignore[attr-defined]
+
+
+class TestSyncDestination:
+    def test_feed_is_rejected_as_a_source_destination(self) -> None:
+        """Saving into `feed` would be invisible to every later cache warm.
+
+        The dedup cache is built by walking the saved locations only, so a
+        document placed in `feed` would be re-saved and re-counted as created
+        after any rebuild.
+        """
+        with pytest.raises(ValidationError):
+            SourceConfig(location="feed")
+
+    @pytest.mark.parametrize("location", SAVED_LOCATIONS)
+    def test_saved_locations_are_accepted(self, location: str) -> None:
+        assert SourceConfig(location=location).location == location
+
+    def test_walked_and_allowed_locations_cannot_drift(self) -> None:
+        # SYNC_LOCATIONS derives from the same type SourceConfig validates
+        # against; this fails loudly if either is ever restated by hand.
+        assert tuple(SYNC_LOCATIONS) == tuple(SAVED_LOCATIONS)

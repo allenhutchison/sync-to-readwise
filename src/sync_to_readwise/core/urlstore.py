@@ -128,7 +128,14 @@ class UrlStore:
         self._conn.commit()
         self._lock = threading.Lock()
 
-        self._reset_if_stale_schema()
+        try:
+            self._reset_if_stale_schema()
+        except BaseException:
+            # A store that fails to open must not leave the connection behind:
+            # the caller has no handle to close, and on the daemon path that
+            # would hold the database file for the life of the process.
+            self._conn.close()
+            raise
 
         self._keys: set[str] = {
             row[0] for row in self._conn.execute("SELECT url_key FROM documents")
@@ -143,28 +150,44 @@ class UrlStore:
         memory. A fresh store has no version row and is stamped without a wipe,
         so this is a no-op on first open.
         """
-        row = self._conn.execute("SELECT value FROM meta WHERE key = ?", (VERSION_KEY,)).fetchone()
-        stored = int(row[0]) if row and row[0].isdigit() else None
+        # BEGIN IMMEDIATE takes the write lock before the version is read, so
+        # the check and the reset it authorizes are one atomic step. A plain
+        # SELECT takes no lock: two processes opening a stale store could both
+        # read the old version, and the slower one would then wipe the rebuild
+        # the faster one had already finished, cursor included.
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = self._conn.execute(
+                "SELECT value FROM meta WHERE key = ?", (VERSION_KEY,)
+            ).fetchone()
+            stored = int(row[0]) if row and row[0].isdigit() else None
 
-        if stored == SCHEMA_VERSION:
-            return
+            if stored == SCHEMA_VERSION:
+                self._conn.rollback()
+                return
 
-        if stored is not None or self._conn.execute("SELECT 1 FROM documents LIMIT 1").fetchone():
-            discarded = self._conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
-            self._conn.execute("DELETE FROM documents")
-            self._conn.execute("DELETE FROM meta WHERE key = ?", (CURSOR_KEY,))
-            log.warning(
-                "url_store_schema_reset",
-                discarded=discarded,
-                found_version=stored,
-                expected_version=SCHEMA_VERSION,
+            if (
+                stored is not None
+                or self._conn.execute("SELECT 1 FROM documents LIMIT 1").fetchone()
+            ):
+                discarded = self._conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+                self._conn.execute("DELETE FROM documents")
+                self._conn.execute("DELETE FROM meta WHERE key = ?", (CURSOR_KEY,))
+                log.warning(
+                    "url_store_schema_reset",
+                    discarded=discarded,
+                    found_version=stored,
+                    expected_version=SCHEMA_VERSION,
+                )
+
+            self._conn.execute(
+                "INSERT INTO meta (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (VERSION_KEY, str(SCHEMA_VERSION)),
             )
-
-        self._conn.execute(
-            "INSERT INTO meta (key, value) VALUES (?, ?) "
-            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            (VERSION_KEY, str(SCHEMA_VERSION)),
-        )
+        except BaseException:
+            self._conn.rollback()
+            raise
         self._conn.commit()
 
     # ---------- membership ----------
