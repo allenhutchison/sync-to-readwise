@@ -380,4 +380,3 @@ def test_class_metadata() -> None:
     assert YouTubeLikesSource.name == "youtube"
     assert YouTubeLikesSource.default_location == "later"
     assert YouTubeLikesSource.default_tags == ("youtube",)
-    assert YouTubeLikesSource.readwise_category == "video"

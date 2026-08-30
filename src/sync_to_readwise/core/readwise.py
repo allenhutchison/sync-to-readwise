@@ -8,6 +8,7 @@ import httpx
 import structlog
 
 from sync_to_readwise.core.item import Item
+from sync_to_readwise.core.urlstore import Document, UrlStore
 
 log = structlog.get_logger(__name__)
 
@@ -40,18 +41,32 @@ class ReadwiseError(Exception):
 class ReadwiseClient:
     """Thin client for the Readwise Reader v3 API.
 
-    Maintains an in-memory cache of known document URLs so we can dedup without
-    re-saving (which would mutate location/tags on already-triaged items).
+    Maintains a cache of known document URLs so we can dedup without re-saving
+    (which would mutate location/tags on already-triaged items). Backed by
+    `UrlStore`, so the cache survives restarts and a warm is incremental.
     """
 
-    def __init__(self, token: str, *, timeout: float = 30.0) -> None:
+    def __init__(
+        self,
+        token: str,
+        *,
+        timeout: float = 30.0,
+        store: UrlStore | None = None,
+    ) -> None:
         self._client = httpx.Client(
             base_url=READER_API,
             headers={"Authorization": f"Token {token}"},
             timeout=timeout,
         )
-        self._known_urls: set[str] = set()
-        self._cache_warmed_for: set[str] = set()
+        # No store supplied means an ephemeral in-memory one, which keeps
+        # one-shot CLI paths and tests from touching the data dir.
+        self._store = store if store is not None else UrlStore()
+        self._owns_store = store is None
+        self._warmed = False
+        # Held across the whole walk, not just the flag check: the daemon starts
+        # every source at once, and without it each would begin its own
+        # concurrent walk before any of them set the flag.
+        self._warm_lock = threading.Lock()
         # Rate limits are per access token, and `run_daemon` shares one client
         # across per-source scheduler threads that all fire at startup. Pacing
         # therefore has to be serialized globally: an unsynchronized check lets
@@ -63,6 +78,8 @@ class ReadwiseClient:
 
     def close(self) -> None:
         self._client.close()
+        if self._owns_store:
+            self._store.close()
 
     def __enter__(self) -> ReadwiseClient:
         return self
@@ -70,41 +87,77 @@ class ReadwiseClient:
     def __exit__(self, *_: object) -> None:
         self.close()
 
-    def warm_cache(self, *, category: str | None = None) -> None:
-        """Populate the in-memory URL cache from Readwise.
+    def warm_cache(self) -> None:
+        """Bring the local URL store in line with Reader.
 
-        Pass category='video' to scope to YouTube/video URLs (much faster than listing all).
-        Idempotent per category.
+        Incremental whenever the store carries a cursor from a previous
+        completed walk: `/list/` is asked only for documents updated since then,
+        which is normally a single request. A store with no cursor — a first run,
+        or a deleted database — falls back to a full walk.
+
+        There is no category scoping. It existed to keep the full walk
+        affordable, at the cost of fetching the same document once per scope and
+        leaving sources whose items span every category (Karakeep) unable to
+        scope at all. Once the walk is incremental the scoping only costs
+        requests.
+
+        Idempotent per process, and safe to call from several threads: the first
+        caller walks while the rest block, rather than all walking at once.
         """
-        cache_key = category or "*"
-        if cache_key in self._cache_warmed_for:
-            return
+        with self._warm_lock:
+            if self._warmed:
+                return
 
-        page_cursor: str | None = None
-        count = 0
-        while True:
-            params: dict[str, Any] = {}
-            if category:
-                params["category"] = category
-            if page_cursor:
-                params["pageCursor"] = page_cursor
+            cursor = self._store.cursor
+            page_cursor: str | None = None
+            latest_updated_at: str | None = cursor
+            found = 0
+            new = 0
 
-            resp = self._request("GET", "/list/", params=params)
-            for doc in resp.get("results", []):
-                url = doc.get("source_url") or doc.get("url")
-                if url:
-                    self._known_urls.add(url)
-                    count += 1
+            while True:
+                params: dict[str, Any] = {}
+                if cursor:
+                    params["updatedAfter"] = cursor
+                if page_cursor:
+                    params["pageCursor"] = page_cursor
 
-            page_cursor = resp.get("nextPageCursor")
-            if not page_cursor:
-                break
+                resp = self._request("GET", "/list/", params=params)
 
-        self._cache_warmed_for.add(cache_key)
-        log.info("readwise_cache_warmed", category=category, count=count)
+                batch: list[Document] = []
+                for doc in resp.get("results", []):
+                    url = doc.get("source_url") or doc.get("url")
+                    if not url:
+                        continue
+                    updated_at = doc.get("updated_at")
+                    if updated_at and (latest_updated_at is None or updated_at > latest_updated_at):
+                        latest_updated_at = updated_at
+                    batch.append(
+                        Document(url=url, readwise_id=doc.get("id"), updated_at=updated_at)
+                    )
+
+                found += len(batch)
+                new += self._store.add_many(batch)
+
+                page_cursor = resp.get("nextPageCursor")
+                if not page_cursor:
+                    break
+
+            # Only now that pagination finished end to end. Advancing per page
+            # would let a walk that dies midway strand every document after the
+            # last committed page outside all future windows.
+            self._store.set_cursor(latest_updated_at)
+            self._warmed = True
+
+        log.info(
+            "readwise_cache_warmed",
+            incremental=bool(cursor),
+            found=found,
+            new=new,
+            known=len(self._store),
+        )
 
     def exists(self, url: str) -> bool:
-        return url in self._known_urls
+        return self._store.contains(url)
 
     def create_document(self, item: Item, *, location: str, tags: list[str]) -> dict[str, Any]:
         """Save a URL to Readwise Reader. Returns the API response payload."""
@@ -127,7 +180,7 @@ class ReadwiseClient:
             payload["tags"] = tags
 
         resp = self._request("POST", "/save/", json=payload)
-        self._known_urls.add(item.url)
+        self._store.add(Document(url=item.url, readwise_id=resp.get("id")))
         return resp
 
     # ---------- internals ----------

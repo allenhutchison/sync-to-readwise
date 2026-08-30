@@ -11,6 +11,7 @@ from sync_to_readwise import cli as cli_mod
 from sync_to_readwise.cli import main
 from sync_to_readwise.core.item import Item
 from sync_to_readwise.core.source import Source
+from sync_to_readwise.core.urlstore import STORE_FILENAME, Document, UrlStore
 
 
 class _StubSource(Source):
@@ -65,8 +66,11 @@ class TestSyncOnce:
         assert "stub:" in result.output
         assert "seen=1" in result.output
         assert "created=1" in result.output
-        # ReadwiseClient was constructed with the env token.
-        readwise_cls.assert_called_once_with("rw")
+        # ReadwiseClient was constructed with the env token and a store, so a
+        # one-shot sync shares dedup state with the daemon rather than starting cold.
+        readwise_cls.assert_called_once()
+        assert readwise_cls.call_args.args == ("rw",)
+        assert isinstance(readwise_cls.call_args.kwargs["store"], UrlStore)
 
     def test_missing_token_fails(self, runner: CliRunner) -> None:
         # No READWISE_TOKEN in env → load() raises ValueError, surfaced by Click.
@@ -304,3 +308,32 @@ class TestStartWebServer:
             cli_mod.start_web_server(cfg, state)
         app = serve.call_args[0][0]
         assert app._youtube is None
+
+
+class TestForget:
+    def test_removes_a_known_url(self, env: Path, runner: CliRunner) -> None:
+        store = UrlStore(env / STORE_FILENAME)
+        store.add(Document(url="https://a.example/1"))
+        store.close()
+
+        result = runner.invoke(
+            main,
+            ["--config", str(env / "missing.yaml"), "forget", "https://a.example/1"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "forgot" in result.output
+        # A running daemon holds its own set, so the CLI must not imply the
+        # removal took effect everywhere.
+        assert "restart" in result.output.lower()
+
+        reopened = UrlStore(env / STORE_FILENAME)
+        assert not reopened.contains("https://a.example/1")
+        reopened.close()
+
+    def test_reports_when_url_is_unknown(self, env: Path, runner: CliRunner) -> None:
+        result = runner.invoke(
+            main,
+            ["--config", str(env / "missing.yaml"), "forget", "https://a.example/nope"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "not in store" in result.output

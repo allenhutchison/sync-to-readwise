@@ -117,8 +117,7 @@ class TestGitHubStarsSource:
             list(src.fetch_candidates())
 
     def test_class_metadata(self) -> None:
-        # Lock down the dedup-cache scoping and default location/tags.
+        # Lock down the default location/tags.
         assert GitHubStarsSource.name == "github_stars"
         assert GitHubStarsSource.default_location == "later"
         assert GitHubStarsSource.default_tags == ("github",)
-        assert GitHubStarsSource.readwise_category == "article"

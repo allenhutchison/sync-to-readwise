@@ -44,7 +44,6 @@ class YouTubeLikesSource(Source):
     name = "youtube"
     default_location = "later"
     default_tags = ("youtube",)
-    readwise_category = "video"
 
     def __init__(
         self,
