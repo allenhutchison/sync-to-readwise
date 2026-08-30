@@ -160,8 +160,7 @@ matches exactly what's registered; if unset, it's derived from the request's
        default_location = "new"
        default_tags = ("mysource",)
 
-       def fetch_candidates(self) -> Iterable[Item]:
-           ...
+       def fetch_candidates(self) -> Iterable[Item]: ...
    ```
 2. Add any new secrets to `Settings` in `core/config.py` (with `validation_alias` for the env var name) and to Doppler.
 3. Register a factory in `src/sync_to_readwise/registry.py`.
