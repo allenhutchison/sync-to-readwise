@@ -9,7 +9,9 @@ from sync_to_readwise.core import readwise as readwise_mod
 from sync_to_readwise.core.item import Item
 from sync_to_readwise.core.readwise import (
     DEFAULT_RETRY_AFTER_S,
+    LIST_MIN_INTERVAL_S,
     MAX_ATTEMPTS,
+    SAVE_MIN_INTERVAL_S,
     ReadwiseClient,
     ReadwiseError,
     _parse_retry_after,
@@ -22,6 +24,35 @@ def no_sleep(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     sleeps: list[float] = []
     monkeypatch.setattr(readwise_mod.time, "sleep", lambda s: sleeps.append(s))
     return sleeps
+
+
+class _Clock:
+    """Monotonic stand-in whose only movement comes from simulated sleeps."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.sleeps: list[float] = []
+
+    def __call__(self) -> float:
+        return self.now
+
+
+@pytest.fixture
+def fake_clock(monkeypatch: pytest.MonkeyPatch) -> _Clock:
+    """Freeze time and make `sleep` advance it, so throttle math is exact.
+
+    Patching `sleep` to a no-op would leave the clock still, and every
+    subsequent throttle check would see zero elapsed time and sleep again.
+    """
+    clock = _Clock()
+
+    def _sleep(seconds: float) -> None:
+        clock.sleeps.append(seconds)
+        clock.now += seconds
+
+    monkeypatch.setattr(readwise_mod.time, "monotonic", clock)
+    monkeypatch.setattr(readwise_mod.time, "sleep", _sleep)
+    return clock
 
 
 @pytest.fixture
@@ -57,7 +88,9 @@ class TestContextManager:
 
 
 class TestWarmCache:
-    def test_paginates_and_collects_urls(self, httpx_mock, client: ReadwiseClient) -> None:
+    def test_paginates_and_collects_urls(
+        self, httpx_mock, client: ReadwiseClient, no_sleep: list[float]
+    ) -> None:
         httpx_mock.add_response(
             url="https://readwise.io/api/v3/list/",
             json={
@@ -83,7 +116,9 @@ class TestWarmCache:
         assert client.exists("https://a.example/3")
         assert not client.exists("https://a.example/missing")
 
-    def test_scoped_to_category(self, httpx_mock, client: ReadwiseClient) -> None:
+    def test_scoped_to_category(
+        self, httpx_mock, client: ReadwiseClient, no_sleep: list[float]
+    ) -> None:
         httpx_mock.add_response(
             url="https://readwise.io/api/v3/list/?category=video",
             json={"results": [{"source_url": "https://yt.example/v"}], "nextPageCursor": None},
@@ -91,7 +126,9 @@ class TestWarmCache:
         client.warm_cache(category="video")
         assert client.exists("https://yt.example/v")
 
-    def test_idempotent_per_category(self, httpx_mock, client: ReadwiseClient) -> None:
+    def test_idempotent_per_category(
+        self, httpx_mock, client: ReadwiseClient, no_sleep: list[float]
+    ) -> None:
         httpx_mock.add_response(
             url="https://readwise.io/api/v3/list/?category=video",
             json={"results": [], "nextPageCursor": None},
@@ -101,7 +138,9 @@ class TestWarmCache:
         # if it did, pytest-httpx would error on a missing matcher.
         client.warm_cache(category="video")
 
-    def test_distinct_categories_warm_separately(self, httpx_mock, client: ReadwiseClient) -> None:
+    def test_distinct_categories_warm_separately(
+        self, httpx_mock, client: ReadwiseClient, no_sleep: list[float]
+    ) -> None:
         httpx_mock.add_response(
             url="https://readwise.io/api/v3/list/?category=video",
             json={"results": [], "nextPageCursor": None},
@@ -186,17 +225,40 @@ class TestCreateDocument:
 
 
 class TestThrottle:
-    def test_sleeps_when_called_too_fast(
-        self, httpx_mock, client: ReadwiseClient, monkeypatch: pytest.MonkeyPatch
+    """Pacing is per endpoint family, because the two limits differ.
+
+    Readwise allows 20/min on /list/ and 50/min on /save/, so one shared clock
+    would either throttle saves needlessly or let list walks exceed their
+    ceiling. `fake_clock` makes sleeping advance virtual time, so these assert
+    real throttle behavior without the suite actually waiting.
+    """
+
+    def test_first_request_is_not_delayed(
+        self, httpx_mock, client: ReadwiseClient, fake_clock: _Clock
     ) -> None:
-        # Force monotonic to advance by less than SAVE_MIN_INTERVAL_S between
-        # the two calls so the second one trips the throttle.
-        ticks = iter([0.0, 0.0, 0.5, 0.5])  # call 1: t0=0, post-sleep=0; call 2: t1=0.5
-        monkeypatch.setattr(readwise_mod.time, "monotonic", lambda: next(ticks))
+        httpx_mock.add_response(
+            url="https://readwise.io/api/v3/list/",
+            json={"results": [], "nextPageCursor": None},
+        )
+        client.warm_cache()
+        assert fake_clock.sleeps == []
 
-        sleeps: list[float] = []
-        monkeypatch.setattr(readwise_mod.time, "sleep", lambda s: sleeps.append(s))
+    def test_list_pages_are_paced(
+        self, httpx_mock, client: ReadwiseClient, fake_clock: _Clock
+    ) -> None:
+        httpx_mock.add_response(
+            url="https://readwise.io/api/v3/list/",
+            json={"results": [], "nextPageCursor": "page2"},
+        )
+        httpx_mock.add_response(
+            url="https://readwise.io/api/v3/list/?pageCursor=page2",
+            json={"results": [], "nextPageCursor": None},
+        )
+        client.warm_cache()
+        # Second page waits out the /list/ interval; the first does not.
+        assert fake_clock.sleeps == [LIST_MIN_INTERVAL_S]
 
+    def test_saves_are_paced(self, httpx_mock, client: ReadwiseClient, fake_clock: _Clock) -> None:
         httpx_mock.add_response(
             url="https://readwise.io/api/v3/save/",
             method="POST",
@@ -204,15 +266,27 @@ class TestThrottle:
             status_code=201,
             is_reusable=True,
         )
-
         client.create_document(_item(url="https://a.example/1"), location="later", tags=[])
         client.create_document(_item(url="https://a.example/2"), location="later", tags=[])
+        assert fake_clock.sleeps == [SAVE_MIN_INTERVAL_S]
 
-        # First call: elapsed = 0 - 0 = 0, sleeps SAVE_MIN_INTERVAL_S - 0
-        # Second call: elapsed = 0.5 - 0.5 = 0, sleeps SAVE_MIN_INTERVAL_S
-        # Both sleeps > 0.
-        assert all(s > 0 for s in sleeps)
-        assert len(sleeps) == 2
+    def test_list_and_save_clocks_are_independent(
+        self, httpx_mock, client: ReadwiseClient, fake_clock: _Clock
+    ) -> None:
+        httpx_mock.add_response(
+            url="https://readwise.io/api/v3/list/",
+            json={"results": [], "nextPageCursor": None},
+        )
+        httpx_mock.add_response(
+            url="https://readwise.io/api/v3/save/",
+            method="POST",
+            json={},
+            status_code=201,
+        )
+        client.warm_cache()
+        client.create_document(_item(url="https://a.example/1"), location="later", tags=[])
+        # A save immediately after a list must not inherit the list's clock.
+        assert fake_clock.sleeps == []
 
 
 class TestRetry:
