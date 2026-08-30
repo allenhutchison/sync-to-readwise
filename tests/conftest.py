@@ -4,6 +4,8 @@ import os
 
 import pytest
 
+from sync_to_readwise.core import readwise as readwise_mod
+
 # Variables Settings reads. Cleared so tests start from a known empty
 # environment regardless of whatever Doppler/.env happens to be loaded
 # in the developer's shell.
@@ -29,3 +31,16 @@ def _isolate_settings_env(monkeypatch: pytest.MonkeyPatch) -> None:
     # repo root contains an .env.example. If a developer copies that to .env
     # for local runs we don't want it leaking into tests.
     monkeypatch.chdir(os.path.dirname(__file__))
+
+
+@pytest.fixture
+def no_sleep(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """Replace time.sleep with a recorder so the suite doesn't actually wait.
+
+    Lives here rather than in one test module because any test that drives a
+    real `ReadwiseClient` pays the /list/ pacing — a warm walks every location
+    in SYNC_LOCATIONS, so that is several seconds per test without this.
+    """
+    sleeps: list[float] = []
+    monkeypatch.setattr(readwise_mod.time, "sleep", lambda s: sleeps.append(s))
+    return sleeps

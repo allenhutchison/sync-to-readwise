@@ -34,6 +34,19 @@ STORE_FILENAME = "readwise_urls.db"
 
 CURSOR_KEY = "updated_after"
 
+VERSION_KEY = "schema_version"
+
+# Bump when stored rows become wrong rather than merely stale, and an existing
+# store has to be discarded rather than topped up. On a mismatch the documents
+# table and the cursor are dropped and the next warm rebuilds from scratch —
+# safe precisely because this is a cache, reconstructible from Reader.
+#
+# 2: v1 stores were built from an unfiltered /list/ walk and so contain
+#    `location=feed` RSS items. Those make `exists()` report saved-document
+#    membership for URLs the user never saved, silently suppressing syncs, so
+#    they cannot simply be left in place alongside correctly-scoped rows.
+SCHEMA_VERSION = 2
+
 # The cursor is rewound by this much before being stored. `updatedAfter` filters
 # on a timestamp Readwise assigns, so a document saved during the walk can carry
 # a stamp just below the maximum we observed and be missed by the next pass. Re-
@@ -115,11 +128,44 @@ class UrlStore:
         self._conn.commit()
         self._lock = threading.Lock()
 
+        self._reset_if_stale_schema()
+
         self._keys: set[str] = {
             row[0] for row in self._conn.execute("SELECT url_key FROM documents")
         }
         if self._keys:
             log.info("url_store_loaded", count=len(self._keys), path=str(path) if path else None)
+
+    def _reset_if_stale_schema(self) -> None:
+        """Drop everything if the store predates SCHEMA_VERSION.
+
+        Runs before `_keys` is populated so a stale store is never read into
+        memory. A fresh store has no version row and is stamped without a wipe,
+        so this is a no-op on first open.
+        """
+        row = self._conn.execute("SELECT value FROM meta WHERE key = ?", (VERSION_KEY,)).fetchone()
+        stored = int(row[0]) if row and row[0].isdigit() else None
+
+        if stored == SCHEMA_VERSION:
+            return
+
+        if stored is not None or self._conn.execute("SELECT 1 FROM documents LIMIT 1").fetchone():
+            discarded = self._conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+            self._conn.execute("DELETE FROM documents")
+            self._conn.execute("DELETE FROM meta WHERE key = ?", (CURSOR_KEY,))
+            log.warning(
+                "url_store_schema_reset",
+                discarded=discarded,
+                found_version=stored,
+                expected_version=SCHEMA_VERSION,
+            )
+
+        self._conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (VERSION_KEY, str(SCHEMA_VERSION)),
+        )
+        self._conn.commit()
 
     # ---------- membership ----------
 

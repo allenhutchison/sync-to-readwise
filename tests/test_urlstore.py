@@ -5,6 +5,7 @@ from pathlib import Path
 
 from sync_to_readwise.core.urlstore import (
     CURSOR_OVERLAP,
+    SCHEMA_VERSION,
     STORE_FILENAME,
     Document,
     UrlStore,
@@ -175,3 +176,60 @@ class TestForget:
         store = UrlStore()
         assert store.forget("https://a.example/nope") is False
         store.close()
+
+
+class TestSchemaVersion:
+    def test_fresh_store_is_stamped_without_a_wipe(self, tmp_path: Path) -> None:
+        path = tmp_path / STORE_FILENAME
+        store = UrlStore(path)
+        store.add(Document(url="https://a.example/1"))
+        store.close()
+
+        reopened = UrlStore(path)
+        # Same version, so the row survives the reopen.
+        assert reopened.contains("https://a.example/1")
+        row = reopened._conn.execute(
+            "SELECT value FROM meta WHERE key = 'schema_version'"
+        ).fetchone()
+        assert int(row[0]) == SCHEMA_VERSION
+        reopened.close()
+
+    def test_store_from_an_older_schema_is_discarded(self, tmp_path: Path) -> None:
+        """A v1 store holds feed URLs, which would suppress real syncs.
+
+        Those rows can't be topped up alongside correct ones — `exists()` would
+        keep reporting saved-document membership for RSS items — so the store is
+        rebuilt from scratch instead.
+        """
+        path = tmp_path / STORE_FILENAME
+        store = UrlStore(path)
+        store.add(Document(url="https://feed.example/rss-item"))
+        store.set_cursor("2026-03-01T12:00:00+00:00")
+        # Rewind the stamp to look like a store written before this version.
+        store._conn.execute(
+            "UPDATE meta SET value = ? WHERE key = 'schema_version'",
+            (str(SCHEMA_VERSION - 1),),
+        )
+        store._conn.commit()
+        store.close()
+
+        reopened = UrlStore(path)
+        assert not reopened.contains("https://feed.example/rss-item")
+        assert len(reopened) == 0
+        # The cursor goes too, or the rebuild would only fetch recent changes
+        # and leave the library permanently half-known.
+        assert reopened.cursor is None
+        reopened.close()
+
+    def test_unstamped_store_with_rows_is_discarded(self, tmp_path: Path) -> None:
+        # Stores written before versioning existed carry rows but no version.
+        path = tmp_path / STORE_FILENAME
+        store = UrlStore(path)
+        store.add(Document(url="https://feed.example/rss-item"))
+        store._conn.execute("DELETE FROM meta WHERE key = 'schema_version'")
+        store._conn.commit()
+        store.close()
+
+        reopened = UrlStore(path)
+        assert len(reopened) == 0
+        reopened.close()

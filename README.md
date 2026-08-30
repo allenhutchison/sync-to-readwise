@@ -258,6 +258,7 @@ To enable publishing, set these repository secrets in GitHub Settings → Secret
 
 - Dedup is a property of the destination, not of any one source: a single URL store in `<data_dir>/readwise_urls.db` is shared by every source, so a link saved by one won't be duplicated by another.
 - The store is refreshed from `/list/` at startup using `updatedAfter`, so a restart re-reads only what changed rather than walking the whole library. A first run — or a deleted database — falls back to one full walk, which at Readwise's 20 req/min list limit takes roughly a minute per 2,000 documents.
+- The walk covers the four *saved* locations (`new`, `later`, `shortlist`, `archive`) and deliberately skips `feed`. Feed documents are RSS items that arrive on their own rather than things you saved, and they typically outnumber the saved library by orders of magnitude. Including them would both bloat the cold walk and — worse — make dedup treat any URL that scrolled through your feed as already-saved, silently skipping it in every source.
 - Deletions are never inferred. If you remove something from Reader and want it synced again, run `sync-to-readwise forget <url>`; nothing prunes the store automatically, because a walk truncated by a rate limit would otherwise look like a mass deletion and re-save the library.
 - We never re-`save` an existing URL, so triaging a video in Reader (moving it out of `later`, retagging) won't be undone by a later sync.
 - Private and deleted videos in your liked list are skipped silently.
