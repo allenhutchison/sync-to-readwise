@@ -3,6 +3,9 @@ from __future__ import annotations
 import httpx
 import pytest
 
+from sync_to_readwise.core.config import SourceConfig
+from sync_to_readwise.core.readwise import ReadwiseClient
+from sync_to_readwise.core.syncer import Syncer
 from sync_to_readwise.sources.karakeep import KarakeepSource
 
 
@@ -64,6 +67,31 @@ class TestKarakeepSource:
         assert item.tags == ("python",)
         request = httpx_mock.get_request()
         assert request.headers["Authorization"] == "Bearer secret"
+
+    def test_existing_non_article_url_is_not_saved_again(self, httpx_mock) -> None:
+        existing_url = "https://example.com/video"
+        httpx_mock.add_response(
+            url="https://readwise.io/api/v3/list/",
+            json={
+                "results": [{"source_url": existing_url, "category": "video"}],
+                "nextPageCursor": None,
+            },
+        )
+        httpx_mock.add_response(
+            url=(
+                "http://karakeep:3000/api/v1/bookmarks"
+                "?archived=false&sortOrder=desc&limit=100&includeContent=false"
+            ),
+            json={"bookmarks": [_bookmark(url=existing_url)], "nextCursor": None},
+        )
+
+        source = KarakeepSource(base_url="http://karakeep:3000", api_key="secret")
+        with ReadwiseClient("token") as readwise:
+            result = Syncer(readwise).sync(source, SourceConfig())
+
+        assert result.created == 0
+        assert result.skipped == 1
+        assert not httpx_mock.get_requests(method="POST")
 
     def test_paginates_with_next_cursor(self, httpx_mock) -> None:
         base_query = "archived=false&sortOrder=desc&limit=100&includeContent=false"
@@ -134,4 +162,4 @@ class TestKarakeepSource:
         assert KarakeepSource.name == "karakeep"
         assert KarakeepSource.default_location == "later"
         assert KarakeepSource.default_tags == ("karakeep",)
-        assert KarakeepSource.readwise_category == "article"
+        assert not hasattr(KarakeepSource, "readwise_category")

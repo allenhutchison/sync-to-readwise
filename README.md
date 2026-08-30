@@ -222,8 +222,8 @@ Per-source options (`karakeep`):
 | `sources.karakeep.no_sync_tags`    | list    | `[no-sync]`    | Unarchived links carrying any of these tags are skipped. Must be a list — a bare string is rejected at startup. |
 | `sources.karakeep.import_tags`     | bool    | `true`         | Copy the bookmark's other Karakeep tags into Reader. |
 
-Unknown keys under a source are rejected at startup rather than ignored, so a
-misspelled option can't look like it took effect.
+Unknown keys in the Karakeep options block are rejected at startup rather than
+ignored, so a misspelled option can't look like it took effect.
 
 Environment (Doppler / `.env`):
 

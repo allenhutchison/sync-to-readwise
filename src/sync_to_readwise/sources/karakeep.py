@@ -36,7 +36,6 @@ class KarakeepSource(Source):
     name = "karakeep"
     default_location = "later"
     default_tags = ("karakeep",)
-    readwise_category = "article"
 
     def __init__(
         self,
