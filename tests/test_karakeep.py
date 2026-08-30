@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from sync_to_readwise.core.config import SourceConfig
-from sync_to_readwise.core.readwise import ReadwiseClient
+from sync_to_readwise.core.readwise import SYNC_LOCATIONS, ReadwiseClient
 from sync_to_readwise.core.syncer import Syncer
 from sync_to_readwise.sources.karakeep import KarakeepSource
 
@@ -68,15 +68,23 @@ class TestKarakeepSource:
         request = httpx_mock.get_request()
         assert request.headers["Authorization"] == "Bearer secret"
 
-    def test_existing_non_article_url_is_not_saved_again(self, httpx_mock) -> None:
+    def test_existing_non_article_url_is_not_saved_again(
+        self, httpx_mock, no_sleep: list[float]
+    ) -> None:
         existing_url = "https://example.com/video"
-        httpx_mock.add_response(
-            url="https://readwise.io/api/v3/list/",
-            json={
-                "results": [{"source_url": existing_url, "category": "video"}],
-                "nextPageCursor": None,
-            },
-        )
+        # The warm walks every saved location; the document lives in one of them.
+        for location in SYNC_LOCATIONS:
+            httpx_mock.add_response(
+                url=f"https://readwise.io/api/v3/list/?location={location}",
+                json={
+                    "results": (
+                        [{"source_url": existing_url, "category": "video"}]
+                        if location == "new"
+                        else []
+                    ),
+                    "nextPageCursor": None,
+                },
+            )
         httpx_mock.add_response(
             url=(
                 "http://karakeep:3000/api/v1/bookmarks"

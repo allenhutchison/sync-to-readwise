@@ -7,6 +7,7 @@ from typing import Any
 import httpx
 import structlog
 
+from sync_to_readwise.core.config import SAVED_LOCATIONS
 from sync_to_readwise.core.item import Item
 from sync_to_readwise.core.urlstore import Document, UrlStore
 
@@ -29,6 +30,24 @@ LIST_MIN_INTERVAL_S = 3.2
 # 50/min would allow 1.2s, but /save/ mutates the user's library and a backfill
 # is not latency-sensitive, so we stay deliberately well under the ceiling.
 SAVE_MIN_INTERVAL_S = 3.5
+
+# Reader locations the dedup cache is built from. Deliberately excludes "feed".
+#
+# Feed documents are RSS items that arrive on their own, not things the user
+# saved, and on a real account they outnumber the saved library by orders of
+# magnitude — the homelab deployment walked 103,819 of them (gizmodo,
+# techcrunch, engadget, …) without reaching the end. Two problems with letting
+# them in: the cold walk becomes ~1,000 requests of mostly irrelevant data, and,
+# worse, `exists()` cannot tell a saved document from an RSS item that scrolled
+# past, so any URL that appeared in the feed would be silently skipped by every
+# source. A false "already have it" drops a document with no error, which is the
+# expensive direction to be wrong in.
+#
+# `/list/` has no "exclude location" filter, so this walks the saved locations by
+# name. Derived from `SyncDestination` rather than restated, so the set a source
+# may save into and the set the cache is built from cannot drift apart — if they
+# did, documents saved to the missing location would be invisible to every warm.
+SYNC_LOCATIONS = SAVED_LOCATIONS
 
 DEFAULT_RETRY_AFTER_S = 10.0
 MAX_ATTEMPTS = 8
@@ -88,18 +107,22 @@ class ReadwiseClient:
         self.close()
 
     def warm_cache(self) -> None:
-        """Bring the local URL store in line with Reader.
+        """Bring the local URL store in line with Reader's saved documents.
+
+        Walks each location in `SYNC_LOCATIONS`, which is every Reader location
+        except `feed` — see that constant for why RSS items must stay out.
 
         Incremental whenever the store carries a cursor from a previous
-        completed walk: `/list/` is asked only for documents updated since then,
-        which is normally a single request. A store with no cursor — a first run,
-        or a deleted database — falls back to a full walk.
+        completed walk: each location is asked only for documents updated since
+        then, normally one request apiece. A store with no cursor — a first run,
+        or a schema reset — falls back to a full walk of the saved library.
 
-        There is no category scoping. It existed to keep the full walk
-        affordable, at the cost of fetching the same document once per scope and
+        There is no per-source category scoping. It existed to keep the full walk
+        affordable, at the cost of fetching shared documents once per scope and
         leaving sources whose items span every category (Karakeep) unable to
-        scope at all. Once the walk is incremental the scoping only costs
-        requests.
+        scope at all. Dedup is a property of the destination, not of who is
+        syncing into it, so one store shared by every source is both simpler and
+        more correct.
 
         Idempotent per process, and safe to call from several threads: the first
         caller walks while the rest block, rather than all walking at once.
@@ -109,48 +132,53 @@ class ReadwiseClient:
                 return
 
             cursor = self._store.cursor
-            page_cursor: str | None = None
             latest_updated_at: str | None = cursor
             found = 0
             new = 0
 
-            while True:
-                params: dict[str, Any] = {}
-                if cursor:
-                    params["updatedAfter"] = cursor
-                if page_cursor:
-                    params["pageCursor"] = page_cursor
+            for location in SYNC_LOCATIONS:
+                page_cursor: str | None = None
+                while True:
+                    params: dict[str, Any] = {"location": location}
+                    if cursor:
+                        params["updatedAfter"] = cursor
+                    if page_cursor:
+                        params["pageCursor"] = page_cursor
 
-                resp = self._request("GET", "/list/", params=params)
+                    resp = self._request("GET", "/list/", params=params)
 
-                batch: list[Document] = []
-                for doc in resp.get("results", []):
-                    url = doc.get("source_url") or doc.get("url")
-                    if not url:
-                        continue
-                    updated_at = doc.get("updated_at")
-                    if updated_at and (latest_updated_at is None or updated_at > latest_updated_at):
-                        latest_updated_at = updated_at
-                    batch.append(
-                        Document(url=url, readwise_id=doc.get("id"), updated_at=updated_at)
-                    )
+                    batch: list[Document] = []
+                    for doc in resp.get("results", []):
+                        url = doc.get("source_url") or doc.get("url")
+                        if not url:
+                            continue
+                        updated_at = doc.get("updated_at")
+                        if updated_at and (
+                            latest_updated_at is None or updated_at > latest_updated_at
+                        ):
+                            latest_updated_at = updated_at
+                        batch.append(
+                            Document(url=url, readwise_id=doc.get("id"), updated_at=updated_at)
+                        )
 
-                found += len(batch)
-                new += self._store.add_many(batch)
+                    found += len(batch)
+                    new += self._store.add_many(batch)
 
-                page_cursor = resp.get("nextPageCursor")
-                if not page_cursor:
-                    break
+                    page_cursor = resp.get("nextPageCursor")
+                    if not page_cursor:
+                        break
 
-            # Only now that pagination finished end to end. Advancing per page
-            # would let a walk that dies midway strand every document after the
-            # last committed page outside all future windows.
+            # Only once every location has paginated to completion. Advancing
+            # mid-walk — per page, or per location — would move the window past
+            # documents that were never ingested, hiding them from every future
+            # pass.
             self._store.set_cursor(latest_updated_at)
             self._warmed = True
 
         log.info(
             "readwise_cache_warmed",
             incremental=bool(cursor),
+            locations=len(SYNC_LOCATIONS),
             found=found,
             new=new,
             known=len(self._store),

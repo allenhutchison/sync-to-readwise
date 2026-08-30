@@ -13,19 +13,12 @@ from sync_to_readwise.core.readwise import (
     LIST_MIN_INTERVAL_S,
     MAX_ATTEMPTS,
     SAVE_MIN_INTERVAL_S,
+    SYNC_LOCATIONS,
     ReadwiseClient,
     ReadwiseError,
     _parse_retry_after,
 )
 from sync_to_readwise.core.urlstore import Document, UrlStore
-
-
-@pytest.fixture
-def no_sleep(monkeypatch: pytest.MonkeyPatch) -> list[float]:
-    """Replace time.sleep with a recorder so the suite doesn't actually wait."""
-    sleeps: list[float] = []
-    monkeypatch.setattr(readwise_mod.time, "sleep", lambda s: sleeps.append(s))
-    return sleeps
 
 
 class _Clock:
@@ -96,12 +89,44 @@ class TestContextManager:
         assert rw._client.is_closed
 
 
+def _empty_locations(httpx_mock, *, skip: str = "", cursor: str | None = None) -> None:
+    """Register an empty page for every saved location except `skip`.
+
+    `warm_cache` walks all of SYNC_LOCATIONS, so a test that only cares about
+    one still has to satisfy the other three or pytest-httpx errors on the
+    unmatched request.
+    """
+    suffix = f"&updatedAfter={quote(cursor, safe='')}" if cursor else ""
+    for location in SYNC_LOCATIONS:
+        if location == skip:
+            continue
+        httpx_mock.add_response(
+            url=f"https://readwise.io/api/v3/list/?location={location}{suffix}",
+            json={"results": [], "nextPageCursor": None},
+        )
+
+
 class TestWarmCache:
+    def test_excludes_the_feed_location(
+        self, httpx_mock, client: ReadwiseClient, no_sleep: list[float]
+    ) -> None:
+        """Feed documents are RSS items, not saved documents.
+
+        Letting them into the store makes `exists()` report membership for URLs
+        the user never saved, so every source would silently skip them.
+        """
+        _empty_locations(httpx_mock)
+        client.warm_cache()
+
+        locations = [req.url.params.get("location") for req in httpx_mock.get_requests()]
+        assert sorted(locations) == sorted(SYNC_LOCATIONS)
+        assert "feed" not in locations
+
     def test_paginates_and_collects_urls(
         self, httpx_mock, client: ReadwiseClient, no_sleep: list[float]
     ) -> None:
         httpx_mock.add_response(
-            url="https://readwise.io/api/v3/list/",
+            url="https://readwise.io/api/v3/list/?location=new",
             json={
                 "results": [
                     {"source_url": "https://a.example/1"},
@@ -112,12 +137,13 @@ class TestWarmCache:
             },
         )
         httpx_mock.add_response(
-            url="https://readwise.io/api/v3/list/?pageCursor=page2",
+            url="https://readwise.io/api/v3/list/?location=new&pageCursor=page2",
             json={
                 "results": [{"source_url": "https://a.example/3"}],
                 "nextPageCursor": None,
             },
         )
+        _empty_locations(httpx_mock, skip="new")
 
         client.warm_cache()
         assert client.exists("https://a.example/1")
@@ -130,7 +156,7 @@ class TestWarmCache:
     ) -> None:
         # No cursor yet, so no updatedAfter filter: the first walk is a full one.
         httpx_mock.add_response(
-            url="https://readwise.io/api/v3/list/",
+            url="https://readwise.io/api/v3/list/?location=new",
             json={
                 "results": [
                     {"source_url": "https://a.example/1", "updated_at": "2026-01-01T00:00:00+00:00"}
@@ -138,6 +164,8 @@ class TestWarmCache:
                 "nextPageCursor": None,
             },
         )
+        _empty_locations(httpx_mock, skip="new")
+
         client.warm_cache()
         assert client.exists("https://a.example/1")
         # The completed walk leaves a cursor behind for next time.
@@ -156,7 +184,10 @@ class TestWarmCache:
 
         # pytest-httpx matches on the full URL, so this asserts the filter is sent.
         httpx_mock.add_response(
-            url=f"https://readwise.io/api/v3/list/?updatedAfter={quote(cursor, safe='')}",
+            url=(
+                "https://readwise.io/api/v3/list/"
+                f"?location=new&updatedAfter={quote(cursor, safe='')}"
+            ),
             json={
                 "results": [
                     {"source_url": "https://a.example/2", "updated_at": "2026-02-01T00:00:00+00:00"}
@@ -164,6 +195,8 @@ class TestWarmCache:
                 "nextPageCursor": None,
             },
         )
+        _empty_locations(httpx_mock, skip="new", cursor=cursor)
+
         with ReadwiseClient("token", store=store) as rw:
             rw.warm_cache()
             # Known from disk without any request having covered it.
@@ -173,10 +206,7 @@ class TestWarmCache:
     def test_idempotent_within_a_process(
         self, httpx_mock, client: ReadwiseClient, no_sleep: list[float]
     ) -> None:
-        httpx_mock.add_response(
-            url="https://readwise.io/api/v3/list/",
-            json={"results": [], "nextPageCursor": None},
-        )
+        _empty_locations(httpx_mock)
         client.warm_cache()
         # A second call must not issue another request — pytest-httpx would
         # error on a missing matcher if it did.
@@ -191,7 +221,7 @@ class TestWarmCache:
         ingested, hiding them from every future pass.
         """
         httpx_mock.add_response(
-            url="https://readwise.io/api/v3/list/",
+            url="https://readwise.io/api/v3/list/?location=new",
             json={
                 "results": [
                     {"source_url": "https://a.example/1", "updated_at": "2026-01-01T00:00:00+00:00"}
@@ -201,7 +231,7 @@ class TestWarmCache:
         )
         for _ in range(MAX_ATTEMPTS):
             httpx_mock.add_response(
-                url="https://readwise.io/api/v3/list/?pageCursor=page2",
+                url="https://readwise.io/api/v3/list/?location=new&pageCursor=page2",
                 status_code=429,
                 headers={"Retry-After": "1"},
             )
@@ -212,6 +242,31 @@ class TestWarmCache:
         assert client._store.cursor is None
         # The page that did land is still persisted; only the cursor is withheld.
         assert client.exists("https://a.example/1")
+
+    def test_cursor_not_advanced_when_a_later_location_fails(
+        self, httpx_mock, client: ReadwiseClient, no_sleep: list[float]
+    ) -> None:
+        """The cursor covers all locations, so any one failing withholds it."""
+        httpx_mock.add_response(
+            url="https://readwise.io/api/v3/list/?location=new",
+            json={
+                "results": [
+                    {"source_url": "https://a.example/1", "updated_at": "2026-01-01T00:00:00+00:00"}
+                ],
+                "nextPageCursor": None,
+            },
+        )
+        for _ in range(MAX_ATTEMPTS):
+            httpx_mock.add_response(
+                url="https://readwise.io/api/v3/list/?location=later",
+                status_code=429,
+                headers={"Retry-After": "1"},
+            )
+
+        with pytest.raises(httpx.HTTPStatusError):
+            client.warm_cache()
+
+        assert client._store.cursor is None
 
 
 class TestCreateDocument:
@@ -297,27 +352,28 @@ class TestThrottle:
     def test_first_request_is_not_delayed(
         self, httpx_mock, client: ReadwiseClient, fake_clock: _Clock
     ) -> None:
-        httpx_mock.add_response(
-            url="https://readwise.io/api/v3/list/",
-            json={"results": [], "nextPageCursor": None},
-        )
+        # A warm now covers four locations, so only the first of those requests
+        # goes out ungated; the rest are paced.
+        _empty_locations(httpx_mock)
         client.warm_cache()
-        assert fake_clock.sleeps == []
+        assert fake_clock.sleeps == [LIST_MIN_INTERVAL_S] * (len(SYNC_LOCATIONS) - 1)
 
     def test_list_pages_are_paced(
         self, httpx_mock, client: ReadwiseClient, fake_clock: _Clock
     ) -> None:
         httpx_mock.add_response(
-            url="https://readwise.io/api/v3/list/",
+            url="https://readwise.io/api/v3/list/?location=new",
             json={"results": [], "nextPageCursor": "page2"},
         )
         httpx_mock.add_response(
-            url="https://readwise.io/api/v3/list/?pageCursor=page2",
+            url="https://readwise.io/api/v3/list/?location=new&pageCursor=page2",
             json={"results": [], "nextPageCursor": None},
         )
+        _empty_locations(httpx_mock, skip="new")
         client.warm_cache()
-        # Second page waits out the /list/ interval; the first does not.
-        assert fake_clock.sleeps == [LIST_MIN_INTERVAL_S]
+        # Five requests total (two pages of `new`, one each for the rest), and
+        # every one after the first waits out the /list/ interval.
+        assert fake_clock.sleeps == [LIST_MIN_INTERVAL_S] * (len(SYNC_LOCATIONS) + 1 - 1)
 
     def test_saves_are_paced(self, httpx_mock, client: ReadwiseClient, fake_clock: _Clock) -> None:
         httpx_mock.add_response(
@@ -334,10 +390,7 @@ class TestThrottle:
     def test_list_and_save_clocks_are_independent(
         self, httpx_mock, client: ReadwiseClient, fake_clock: _Clock
     ) -> None:
-        httpx_mock.add_response(
-            url="https://readwise.io/api/v3/list/",
-            json={"results": [], "nextPageCursor": None},
-        )
+        _empty_locations(httpx_mock)
         httpx_mock.add_response(
             url="https://readwise.io/api/v3/save/",
             method="POST",
@@ -345,9 +398,11 @@ class TestThrottle:
             status_code=201,
         )
         client.warm_cache()
+        before_save = list(fake_clock.sleeps)
         client.create_document(_item(url="https://a.example/1"), location="later", tags=[])
-        # A save immediately after a list must not inherit the list's clock.
-        assert fake_clock.sleeps == []
+        # A save immediately after a list walk must not inherit the list clock,
+        # so it adds no sleep of its own.
+        assert fake_clock.sleeps == before_save
 
 
 class TestRetry:
@@ -492,12 +547,13 @@ class TestRequestEdgeCases:
         self, httpx_mock, client: ReadwiseClient, no_sleep: list[float]
     ) -> None:
         # 204-ish path (no content). _request should return {} rather than crash.
-        httpx_mock.add_response(
-            url="https://readwise.io/api/v3/list/",
-            method="GET",
-            content=b"",
-            status_code=200,
-        )
+        for location in SYNC_LOCATIONS:
+            httpx_mock.add_response(
+                url=f"https://readwise.io/api/v3/list/?location={location}",
+                method="GET",
+                content=b"",
+                status_code=200,
+            )
         # Use the public surface to exercise _request.
         client.warm_cache()
         # A no-content list still completes the warm_cache loop.
